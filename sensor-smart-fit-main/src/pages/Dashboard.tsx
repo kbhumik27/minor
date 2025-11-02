@@ -12,6 +12,7 @@ import {
   Play, Pause, RotateCcw, Save 
 } from "lucide-react";
 import SensorVisualizer from "@/components/SensorVisualizer";
+import HumanVisualizer from "@/components/HumanVisualizer";
 import RepCounter from "@/components/RepCounter";
 import FormFeedback from "@/components/FormFeedback";
 import io from "socket.io-client";
@@ -34,6 +35,15 @@ interface SensorData {
   formScore?: number;
   feedback?: string;
   timestamp: number;
+  meshData?: {
+    joints: {
+      [key: string]: {
+        position: { x: number; y: number; z: number };
+        children: string[];
+        name: string;
+      };
+    };
+  };
 }
 
 const Dashboard = () => {
@@ -112,6 +122,47 @@ const Dashboard = () => {
       toast({
         title: "Error",
         description: "Could not disconnect",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleStartDemo = async (exercise: string) => {
+    try {
+      const response = await fetch("http://localhost:5000/api/start_demo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exercise }),
+      });
+      const data = await response.json();
+      setConnected(true);
+      toast({
+        title: "Demo Mode Started",
+        description: `Running ${exercise} simulation`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Could not start demo mode",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleStopDemo = async () => {
+    try {
+      await fetch("http://localhost:5000/api/stop_demo", {
+        method: "POST",
+      });
+      setConnected(false);
+      toast({
+        title: "Demo Mode Stopped",
+        description: "Demo simulation ended",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Could not stop demo mode",
         variant: "destructive",
       });
     }
@@ -229,10 +280,20 @@ const Dashboard = () => {
                   />
                 </div>
                 <div className="flex items-end">
-                  <Button onClick={handleConnect} className="bg-gradient-primary hover:shadow-glow">
-                    <Wifi className="w-4 h-4 mr-2" />
-                    Connect
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button onClick={handleConnect} className="bg-gradient-primary hover:shadow-glow">
+                      <Wifi className="w-4 h-4 mr-2" />
+                      Connect ESP32
+                    </Button>
+                    <Button 
+                      onClick={() => handleStartDemo("squat")} 
+                      variant="outline" 
+                      className="border-accent/50 hover:border-accent"
+                    >
+                      <Activity className="w-4 h-4 mr-2" />
+                      Start Demo
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -274,7 +335,14 @@ const Dashboard = () => {
                     {isLogging ? <Pause className="w-4 h-4 mr-2" /> : <Save className="w-4 h-4 mr-2" />}
                     {isLogging ? "Stop Logging" : "Start Logging"}
                   </Button>
-                  <Button onClick={handleDisconnect} variant="outline" className="border-destructive/50">
+                  <Button 
+                    onClick={() => {
+                      handleDisconnect();
+                      handleStopDemo();
+                    }} 
+                    variant="outline" 
+                    className="border-destructive/50"
+                  >
                     <WifiOff className="w-4 h-4 mr-2" />
                     Disconnect
                   </Button>
@@ -284,9 +352,21 @@ const Dashboard = () => {
 
             {/* Main Dashboard Grid */}
             <div className="grid lg:grid-cols-3 gap-8 mb-8">
-              {/* Left Column - Visualizer */}
+              {/* Left Column - Visualizers */}
               <div className="lg:col-span-2">
-                <SensorVisualizer sensorData={sensorData} />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <Card className="bg-card/80 backdrop-blur-xl border-border/50 p-4">
+                    <CardTitle className="mb-4">Sensor Data</CardTitle>
+                    <SensorVisualizer sensorData={sensorData} />
+                  </Card>
+                  <Card className="bg-card/80 backdrop-blur-xl border-border/50 p-4">
+                    <CardTitle className="mb-4">3D Visualization</CardTitle>
+                    <HumanVisualizer 
+                      meshData={sensorData.meshData}
+                      exercise={sensorData.exercise}
+                    />
+                  </Card>
+                </div>
               </div>
 
               {/* Right Column - Stats */}
@@ -350,8 +430,6 @@ const Dashboard = () => {
           </>
         )}
       </div>
-      
-      
     </div>
   );
 };

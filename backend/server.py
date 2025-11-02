@@ -45,111 +45,14 @@ connected_to_esp32 = False
 esp32_websocket = None
 data_log = []
 logging_enabled = False
+demo_mode = False  # Track if demo mode is active
 
 # AI Model placeholder (load your trained model here)
 ai_model = None
 form_analyzer = None
 
 
-class FormAnalyzer:
-    """Real-time form analysis"""
-    
-    def __init__(self):
-        self.thresholds = {
-            'squat': {'min_depth': -40, 'max_roll': 15},
-            'pushup': {'min_depth': 20, 'max_roll': 15},
-            'bicep_curl': {'min_curl': 60, 'max_roll': 10}
-        }
-        self.rep_state = 'up'
-        self.last_rep_count = 0
-    
-    def analyze(self, exercise, pitch, roll):
-        """Analyze form and detect reps"""
-        score = 100
-        feedback = []
-        rep_detected = False
-        
-        if exercise == 'squat':
-            score, feedback, rep_detected = self._analyze_squat(pitch, roll)
-        elif exercise == 'pushup':
-            score, feedback, rep_detected = self._analyze_pushup(pitch, roll)
-        elif exercise == 'bicep_curl':
-            score, feedback, rep_detected = self._analyze_bicep_curl(pitch, roll)
-        
-        return score, feedback, rep_detected
-    
-    def _analyze_squat(self, pitch, roll):
-        score = 100
-        feedback = []
-        rep_detected = False
-        
-        # Detect downward phase
-        if self.rep_state == 'up' and pitch < -30:
-            self.rep_state = 'down'
-            if pitch < -50:
-                feedback.append("🎯 Perfect depth!")
-                score = 100
-            elif pitch < -40:
-                feedback.append("✓ Good depth")
-                score = 90
-            else:
-                feedback.append("⚠ Go deeper")
-                score = 70
-        
-        # Detect upward phase (rep complete)
-        elif self.rep_state == 'down' and pitch > -10:
-            self.rep_state = 'up'
-            rep_detected = True
-            feedback.append("✓ Rep complete!")
-        
-        # Check alignment
-        if abs(roll) > self.thresholds['squat']['max_roll']:
-            score -= 20
-            feedback.append("⚠ Keep back straight")
-        
-        return score, feedback, rep_detected
-    
-    def _analyze_pushup(self, pitch, roll):
-        score = 100
-        feedback = []
-        rep_detected = False
-        
-        if self.rep_state == 'up' and pitch > 20:
-            self.rep_state = 'down'
-            if abs(roll) > 15:
-                feedback.append("⚠ Align shoulders")
-                score = 70
-            else:
-                feedback.append("💪 Good form!")
-                score = 95
-        
-        elif self.rep_state == 'down' and pitch < 5:
-            self.rep_state = 'up'
-            rep_detected = True
-            feedback.append("✓ Rep complete!")
-        
-        return score, feedback, rep_detected
-    
-    def _analyze_bicep_curl(self, pitch, roll):
-        score = 100
-        feedback = []
-        rep_detected = False
-        
-        if self.rep_state == 'down' and pitch > 60:
-            self.rep_state = 'up'
-            feedback.append("💪 Full contraction!")
-            score = 95
-        
-        elif self.rep_state == 'up' and pitch < 20:
-            self.rep_state = 'down'
-            rep_detected = True
-            feedback.append("✓ Rep complete!")
-        
-        if abs(roll) > 10:
-            score -= 20
-            feedback.append("⚠ Stabilize forearm")
-        
-        return score, feedback, rep_detected
+from form_analyzer import FormAnalyzer
 
 
 # Initialize form analyzer
@@ -194,6 +97,9 @@ async def connect_to_esp32(esp32_url):
                         
                         sensor_data['formScore'] = score
                         sensor_data['feedback'] = ' | '.join(feedback) if feedback else ''
+                        
+                        # Get mesh data for visualization
+                        sensor_data['meshData'] = form_analyzer.get_mesh_data()
                         
                         # Increment rep count if detected
                         if rep_detected:
@@ -289,6 +195,57 @@ def disconnect_esp32():
     global connected_to_esp32
     connected_to_esp32 = False
     return jsonify({'status': 'disconnected'})
+
+@app.route('/api/start_demo', methods=['POST'])
+def start_demo():
+    """Start demo mode with simulated sensor data"""
+    global demo_mode, sensor_data
+    
+    data = request.json
+    exercise = data.get('exercise', 'squat')
+    
+    # Stop any existing ESP32 connection
+    global connected_to_esp32
+    connected_to_esp32 = False
+    
+    # Start demo mode
+    demo_mode = True
+    result = form_analyzer.start_demo(exercise)
+    sensor_data['exercise'] = exercise
+    
+    # Start demo data generation in background
+    def demo_data_generator():
+        while demo_mode:
+            demo_data = form_analyzer.get_demo_data()
+            if demo_data:
+                sensor_data.update(demo_data)
+                
+                # Analyze form
+                score, feedback, rep_detected = form_analyzer.analyze(
+                    exercise,
+                    demo_data['pitch'],
+                    demo_data['roll'],
+                    demo_data
+                )
+                
+                sensor_data['formScore'] = score
+                sensor_data['feedback'] = ' | '.join(feedback) if feedback else ''
+                sensor_data['meshData'] = form_analyzer.get_mesh_data()
+                
+                # Broadcast to clients
+                socketio.emit('sensor_data', sensor_data)
+            socketio.sleep(0.1)  # Update at 10Hz
+    
+    socketio.start_background_task(demo_data_generator)
+    return jsonify(result)
+
+@app.route('/api/stop_demo', methods=['POST'])
+def stop_demo():
+    """Stop demo mode"""
+    global demo_mode
+    demo_mode = False
+    result = form_analyzer.stop_demo()
+    return jsonify(result)
 
 
 @app.route('/api/send_command', methods=['POST'])

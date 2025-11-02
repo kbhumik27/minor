@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { User, Wifi, WifiOff } from "lucide-react";
+import { User, Wifi, WifiOff, PlayCircle, StopCircle } from "lucide-react";
 import SensorVisualizer from "@/components/SensorVisualizer";
 import RepCounter from "@/components/RepCounter";
 import FormFeedback from "@/components/FormFeedback";
+import HumanVisualizer from "@/components/HumanVisualizer";
 import io from "socket.io-client";
 
 interface SensorData {
@@ -32,6 +33,7 @@ interface SensorData {
   formScore?: number;
   feedback?: string;
   timestamp: number;
+  demoMode?: boolean;
 }
 
 const Dashboard = () => {
@@ -45,6 +47,7 @@ const Dashboard = () => {
   });
   const [selectedExercise, setSelectedExercise] = useState("squat");
   const [isLogging, setIsLogging] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -57,6 +60,7 @@ const Dashboard = () => {
 
     socket.on("sensor_data", (data: SensorData) => {
       setSensorData(data);
+      setDemoMode(!!data.demoMode);
     });
 
     socket.on("esp32_status", (status: { connected: boolean; error?: string }) => {
@@ -74,6 +78,35 @@ const Dashboard = () => {
       socket.disconnect();
     };
   }, [toast]);
+
+  const handleToggleDemo = async () => {
+    try {
+      const response = await fetch("http://localhost:5000/api/toggle_demo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enable: !demoMode }),
+      });
+      const data = await response.json();
+      
+      if (data.status === 'demo_started') {
+        toast({
+          title: "Demo Mode Enabled",
+          description: "Using simulated sensor data",
+        });
+      } else {
+        toast({
+          title: "Demo Mode Disabled",
+          description: "Returning to normal operation",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Could not toggle demo mode",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleConnect = async () => {
     try {
@@ -201,15 +234,15 @@ const Dashboard = () => {
                 Profile
               </Button>
             </Link>
-            <Badge className={`px-3 py-2 ${connected ? 'bg-success/20 text-success border-success/30' : 'bg-destructive/20 text-destructive border-destructive/30'}`}>
-              {connected ? <Wifi className="w-4 h-4 mr-2" /> : <WifiOff className="w-4 h-4 mr-2" />}
-              {connected ? "Connected" : "Disconnected"}
+            <Badge className={`px-3 py-2 ${connected || demoMode ? 'bg-success/20 text-success border-success/30' : 'bg-destructive/20 text-destructive border-destructive/30'}`}>
+              {connected || demoMode ? <Wifi className="w-4 h-4 mr-2" /> : <WifiOff className="w-4 h-4 mr-2" />}
+              {demoMode ? "Demo Mode" : (connected ? "Connected" : "Disconnected")}
             </Badge>
           </div>
         </div>
 
         {/* Connection Card */}
-        {!connected && (
+        {!connected && !demoMode && (
           <Card className="glass-card mb-8">
             <CardContent>
               <div className="flex flex-col md:flex-row gap-4 items-center">
@@ -228,7 +261,13 @@ const Dashboard = () => {
                     <Wifi className="w-4 h-4 mr-2" />
                     Connect
                   </Button>
-                  <Button variant="outline" onClick={() => setEsp32Url('')}>Clear</Button>
+                  <Button onClick={handleToggleDemo} className="bg-gradient-button text-white">
+                    <PlayCircle className="w-4 h-4 mr-2" />
+                    Demo Mode
+                  </Button>
+                  <Button onClick={() => setEsp32Url('')} className="bg-secondary">
+                    Clear
+                  </Button>
                 </div>
               </div>
             </CardContent>
@@ -260,8 +299,16 @@ const Dashboard = () => {
             <div className="grid lg:grid-cols-3 gap-8 mb-8">
               <div className="lg:col-span-2">
                 <div className="glass-card p-6">
-                  <h3 className="text-lg font-semibold mb-4">Live Sensor Visualizer</h3>
-                  <SensorVisualizer sensorData={sensorData} />
+                  <h3 className="text-lg font-semibold mb-4">Live Sensor Visualization</h3>
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <SensorVisualizer sensorData={sensorData} />
+                    <HumanVisualizer 
+                      pitch={sensorData.pitch}
+                      roll={sensorData.roll}
+                      yaw={sensorData.yaw}
+                      exercise={sensorData.exercise}
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-6">
                   <div className="glass-card p-4">
@@ -292,10 +339,19 @@ const Dashboard = () => {
                     </Select>
                     <div className="flex gap-2">
                       <Button onClick={handleStartWorkout} className="bg-gradient-button text-white flex-1">Start</Button>
-                      <Button onClick={handleResetReps} variant="outline">Reset</Button>
+                      <Button onClick={handleResetReps} className="bg-secondary">Reset</Button>
                     </div>
-                    <Button onClick={handleToggleLogging} variant={isLogging ? 'destructive' : 'outline'} className="w-full">{isLogging ? 'Stop Logging' : 'Start Logging'}</Button>
-                    <Button onClick={handleDisconnect} variant="ghost" className="w-full">Disconnect</Button>
+                    <Button onClick={handleToggleLogging} className={`w-full ${isLogging ? 'bg-destructive' : 'bg-secondary'}`}>
+                      {isLogging ? 'Stop Logging' : 'Start Logging'}
+                    </Button>
+                    {demoMode ? (
+                      <Button onClick={handleToggleDemo} className="w-full bg-secondary">
+                        <StopCircle className="w-4 h-4 mr-2" />
+                        Exit Demo Mode
+                      </Button>
+                    ) : (
+                      <Button onClick={handleDisconnect} className="w-full bg-secondary">Disconnect</Button>
+                    )}
                   </div>
                 </div>
 
