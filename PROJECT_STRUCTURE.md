@@ -10,7 +10,8 @@ ai-fitness-tracker/
 ├── 📁 frontend/frontend/                # React Frontend Application
 │   ├── 📁 public/                      # Static assets
 │   │   ├── 🌐 index.html               # Main HTML template
-│   │   └── 🖼️ vite.svg                 # Vite logo
+│   │   ├── 🖼️ favicon.svg              # Custom fitness tracker favicon
+│   │   └── 📄 manifest.json            # PWA manifest
 │   │
 │   ├── 📁 src/                         # Source code
 │   │   ├── ⚛️ App.tsx                   # Main React component

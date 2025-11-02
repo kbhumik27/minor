@@ -14,10 +14,19 @@ import numpy as np
 from collections import deque
 from datetime import datetime
 import os
+from pathlib import Path
 
-app = Flask(__name__, static_folder='build')
+# Get the base directory (parent of backend folder)
+BASE_DIR = Path(__file__).parent.parent
+FRONTEND_BUILD_DIR = BASE_DIR / 'frontend' / 'frontend' / 'dist'
+FRONTEND_DEV_DIR = BASE_DIR / 'frontend' / 'frontend'
+
+# Determine if we're in development or production mode
+DEV_MODE = os.getenv('FLASK_ENV') == 'development' or not FRONTEND_BUILD_DIR.exists()
+
+app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Global state
 sensor_data = {
@@ -225,15 +234,30 @@ def run_esp32_connection(esp32_url):
 @app.route('/')
 def index():
     """Serve React app"""
-    return send_from_directory(app.static_folder, 'index.html')
+    if DEV_MODE:
+        # In dev mode, redirect to Vite dev server or show a message
+        return jsonify({
+            'message': 'Frontend not built. Run "npm run build" in frontend/frontend directory',
+            'dev_mode': True,
+            'frontend_dev_url': 'http://localhost:5173'
+        })
+    else:
+        return send_from_directory(str(FRONTEND_BUILD_DIR), 'index.html')
 
 
 @app.route('/api/status')
 def get_status():
     """Get system status"""
+    try:
+        # Get connected clients count
+        rooms = socketio.server.manager.rooms if hasattr(socketio.server, 'manager') else {}
+        clients_count = len(rooms.get('/', {}).get('/', set())) if rooms else 0
+    except:
+        clients_count = 0
+    
     return jsonify({
         'esp32_connected': connected_to_esp32,
-        'clients_connected': len(socketio.server.manager.rooms.get('/', {}).get('/', set())),
+        'clients_connected': clients_count,
         'logging_enabled': logging_enabled,
         'data_points_logged': len(data_log)
     })
@@ -378,20 +402,49 @@ def handle_data_request():
 # Serve static files for React build
 @app.route('/<path:path>')
 def serve_static(path):
-    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
+    """Serve static files from React build, fallback to index.html for SPA routing"""
+    if path.startswith('api/'):
+        # Don't serve API routes as static files
+        return jsonify({'error': 'API endpoint not found'}), 404
+    
+    if DEV_MODE:
+        return jsonify({
+            'message': 'Frontend not built. Run "npm run build" in frontend/frontend directory',
+            'dev_mode': True,
+            'frontend_dev_url': 'http://localhost:5173'
+        })
+    
+    # Check if the file exists in the build directory
+    file_path = FRONTEND_BUILD_DIR / path
+    if file_path.exists() and file_path.is_file():
+        return send_from_directory(str(FRONTEND_BUILD_DIR), path)
     else:
-        return send_from_directory(app.static_folder, 'index.html')
+        # Fallback to index.html for SPA routing (React Router)
+        return send_from_directory(str(FRONTEND_BUILD_DIR), 'index.html')
 
 
 if __name__ == '__main__':
     print("=" * 60)
     print("AI Fitness Tracker - Python Backend Server")
     print("=" * 60)
+    
+    if DEV_MODE:
+        print("\n⚠️  DEVELOPMENT MODE")
+        print("Frontend build not found. To serve the frontend:")
+        print("  1. Run: cd frontend/frontend && npm run build")
+        print("  2. Or use the Vite dev server: npm run dev")
+        print("     Then access: http://localhost:5173")
+        print(f"     (Backend API will be at: http://localhost:5000)")
+    else:
+        print("\n✓ Production Mode - Frontend build found")
+        print(f"Frontend directory: {FRONTEND_BUILD_DIR}")
+    
     print("\nStarting server...")
     print("Backend API: http://localhost:5000")
-    print("React Dashboard: http://localhost:5000")
-    print("\nEndpoints:")
+    if not DEV_MODE:
+        print("React Dashboard: http://localhost:5000")
+    
+    print("\nAPI Endpoints:")
     print("  GET  /api/status - System status")
     print("  GET  /api/sensor_data - Current sensor data")
     print("  POST /api/connect_esp32 - Connect to ESP32")
