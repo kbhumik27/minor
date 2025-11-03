@@ -1,11 +1,14 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Activity } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { Activity, Compass, Move3d } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 interface SensorData {
   ax: number;
   ay: number;
   az: number;
+  gx?: number;
+  gy?: number;
+  gz?: number;
   pitch: number;
   roll: number;
   yaw: number;
@@ -17,6 +20,7 @@ interface SensorVisualizerProps {
 
 const SensorVisualizer = ({ sensorData }: SensorVisualizerProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [prevData, setPrevData] = useState(sensorData);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -31,6 +35,18 @@ const SensorVisualizer = ({ sensorData }: SensorVisualizerProps) => {
 
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
+
+    // Smooth interpolation between previous and current data
+    const lerpFactor = 0.15;
+    const smoothData = {
+      ax: prevData.ax + (sensorData.ax - prevData.ax) * lerpFactor,
+      ay: prevData.ay + (sensorData.ay - prevData.ay) * lerpFactor,
+      az: prevData.az + (sensorData.az - prevData.az) * lerpFactor,
+      pitch: prevData.pitch + (sensorData.pitch - prevData.pitch) * lerpFactor,
+      roll: prevData.roll + (sensorData.roll - prevData.roll) * lerpFactor,
+      yaw: prevData.yaw + (sensorData.yaw - prevData.yaw) * lerpFactor,
+    };
+    setPrevData(smoothData);
 
     // Clear canvas
     ctx.fillStyle = "rgba(31, 41, 55, 0.5)";
@@ -54,9 +70,9 @@ const SensorVisualizer = ({ sensorData }: SensorVisualizerProps) => {
 
     // Draw 3D cube representing device orientation
     const size = 80;
-    const pitch = (sensorData.pitch * Math.PI) / 180;
-    const roll = (sensorData.roll * Math.PI) / 180;
-    const yaw = (sensorData.yaw * Math.PI) / 180;
+    const pitch = (smoothData.pitch * Math.PI) / 180;
+    const roll = (smoothData.roll * Math.PI) / 180;
+    const yaw = (smoothData.yaw * Math.PI) / 180;
 
     // Calculate 3D cube vertices
     const vertices = [
@@ -64,19 +80,19 @@ const SensorVisualizer = ({ sensorData }: SensorVisualizerProps) => {
       [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]
     ];
 
-    // Rotate vertices
+    // Rotate vertices with smooth transitions
     const rotatedVertices = vertices.map(([x, y, z]) => {
       // Rotate around X (pitch)
-      let y1 = y * Math.cos(pitch) - z * Math.sin(pitch);
-      let z1 = y * Math.sin(pitch) + z * Math.cos(pitch);
+      const y1 = y * Math.cos(pitch) - z * Math.sin(pitch);
+      const z1 = y * Math.sin(pitch) + z * Math.cos(pitch);
       
       // Rotate around Y (roll)
-      let x1 = x * Math.cos(roll) + z1 * Math.sin(roll);
-      let z2 = -x * Math.sin(roll) + z1 * Math.cos(roll);
+      const x1 = x * Math.cos(roll) + z1 * Math.sin(roll);
+      const z2 = -x * Math.sin(roll) + z1 * Math.cos(roll);
       
       // Rotate around Z (yaw)
-      let x2 = x1 * Math.cos(yaw) - y1 * Math.sin(yaw);
-      let y2 = x1 * Math.sin(yaw) + y1 * Math.cos(yaw);
+      const x2 = x1 * Math.cos(yaw) - y1 * Math.sin(yaw);
+      const y2 = x1 * Math.sin(yaw) + y1 * Math.cos(yaw);
 
       return [x2 * size + centerX, y2 * size + centerY, z2];
     });
@@ -106,8 +122,8 @@ const SensorVisualizer = ({ sensorData }: SensorVisualizerProps) => {
 
     // Draw acceleration vector
     const accelScale = 50;
-    const accelX = centerX + sensorData.ax * accelScale;
-    const accelY = centerY + sensorData.ay * accelScale;
+    const accelX = centerX + smoothData.ax * accelScale;
+    const accelY = centerY + smoothData.ay * accelScale;
     
     const accelGradient = ctx.createLinearGradient(centerX, centerY, accelX, accelY);
     accelGradient.addColorStop(0, "rgba(34, 211, 238, 0.8)");
@@ -135,37 +151,78 @@ const SensorVisualizer = ({ sensorData }: SensorVisualizerProps) => {
     ctx.font = "14px sans-serif";
     ctx.fillText("Acceleration Vector", 20, 30);
 
-  }, [sensorData]);
+  }, [sensorData, prevData]);
+
+  const totalAccel = Math.sqrt(sensorData.ax ** 2 + sensorData.ay ** 2 + sensorData.az ** 2);
+  const totalGyro = sensorData.gx && sensorData.gy && sensorData.gz 
+    ? Math.sqrt(sensorData.gx ** 2 + sensorData.gy ** 2 + sensorData.gz ** 2)
+    : 0;
 
   return (
-    <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated h-full">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Activity className="w-5 h-5 text-primary animate-pulse" />
-          Live Sensor Visualization
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <canvas 
-          ref={canvasRef} 
-          className="w-full h-[400px] rounded-lg bg-secondary/30 animate-data-pulse"
-        />
-        <div className="grid grid-cols-3 gap-4 mt-4 text-sm">
-          <div className="text-center">
-            <div className="text-muted-foreground mb-1">Accel X</div>
-            <div className="font-mono text-primary">{sensorData.ax.toFixed(2)} g</div>
+    <div className="space-y-4">
+      <canvas 
+        ref={canvasRef} 
+        className="w-full h-[450px] rounded-xl bg-gradient-to-br from-slate-900/50 to-slate-800/50 border border-border/30 shadow-lg transition-all duration-300 hover:shadow-xl"
+      />
+      
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="text-center p-4 rounded-lg bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/20 transition-all duration-300 hover:scale-105">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Move3d className="w-4 h-4 text-orange-500" />
+            <div className="text-xs font-semibold text-orange-500">ACCEL X</div>
           </div>
-          <div className="text-center">
-            <div className="text-muted-foreground mb-1">Accel Y</div>
-            <div className="font-mono text-accent">{sensorData.ay.toFixed(2)} g</div>
-          </div>
-          <div className="text-center">
-            <div className="text-muted-foreground mb-1">Accel Z</div>
-            <div className="font-mono text-success">{sensorData.az.toFixed(2)} g</div>
-          </div>
+          <div className="text-2xl font-bold text-orange-500 transition-all duration-300">{sensorData.ax.toFixed(2)}</div>
+          <div className="text-xs text-muted-foreground mt-1">g-force</div>
         </div>
-      </CardContent>
-    </Card>
+        
+        <div className="text-center p-4 rounded-lg bg-gradient-to-br from-cyan-500/10 to-cyan-500/5 border border-cyan-500/20 transition-all duration-300 hover:scale-105">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Move3d className="w-4 h-4 text-cyan-500" />
+            <div className="text-xs font-semibold text-cyan-500">ACCEL Y</div>
+          </div>
+          <div className="text-2xl font-bold text-cyan-500 transition-all duration-300">{sensorData.ay.toFixed(2)}</div>
+          <div className="text-xs text-muted-foreground mt-1">g-force</div>
+        </div>
+        
+        <div className="text-center p-4 rounded-lg bg-gradient-to-br from-green-500/10 to-green-500/5 border border-green-500/20 transition-all duration-300 hover:scale-105">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Move3d className="w-4 h-4 text-green-500" />
+            <div className="text-xs font-semibold text-green-500">ACCEL Z</div>
+          </div>
+          <div className="text-2xl font-bold text-green-500 transition-all duration-300">{sensorData.az.toFixed(2)}</div>
+          <div className="text-xs text-muted-foreground mt-1">g-force</div>
+        </div>
+        
+        <div className="text-center p-4 rounded-lg bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/20 transition-all duration-300 hover:scale-105">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Activity className="w-4 h-4 text-purple-500" />
+            <div className="text-xs font-semibold text-purple-500">MAGNITUDE</div>
+          </div>
+          <div className="text-2xl font-bold text-purple-500 transition-all duration-300">{totalAccel.toFixed(2)}</div>
+          <div className="text-xs text-muted-foreground mt-1">total g</div>
+        </div>
+        
+        <div className="text-center p-4 rounded-lg bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20 transition-all duration-300 hover:scale-105">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Compass className="w-4 h-4 text-blue-500" />
+            <div className="text-xs font-semibold text-blue-500">YAW (HEADING)</div>
+          </div>
+          <div className="text-2xl font-bold text-blue-500 transition-all duration-300">{sensorData.yaw.toFixed(1)}°</div>
+          <div className="text-xs text-muted-foreground mt-1">rotation</div>
+        </div>
+        
+        {totalGyro > 0 && (
+          <div className="text-center p-4 rounded-lg bg-gradient-to-br from-pink-500/10 to-pink-500/5 border border-pink-500/20 transition-all duration-300 hover:scale-105">
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <Activity className="w-4 h-4 text-pink-500" />
+              <div className="text-xs font-semibold text-pink-500">GYRO</div>
+            </div>
+            <div className="text-2xl font-bold text-pink-500 transition-all duration-300">{totalGyro.toFixed(1)}</div>
+            <div className="text-xs text-muted-foreground mt-1">°/s</div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 

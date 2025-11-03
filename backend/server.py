@@ -108,11 +108,11 @@ async def connect_to_esp32(esp32_url):
                     # Broadcast to all connected clients
                     socketio.emit('sensor_data', sensor_data)
                     
-                    # Log data if enabled
+                    # Log data if enabled (exclude meshData which is too complex for CSV)
                     if logging_enabled:
                         log_entry = {
                             'timestamp': datetime.now().isoformat(),
-                            **sensor_data
+                            **{k: v for k, v in sensor_data.items() if k != 'meshData'}
                         }
                         data_log.append(log_entry)
                     
@@ -234,6 +234,14 @@ def start_demo():
                 
                 # Broadcast to clients
                 socketio.emit('sensor_data', sensor_data)
+                
+                # Log data if enabled
+                if logging_enabled:
+                    log_entry = {
+                        'timestamp': datetime.now().isoformat(),
+                        **{k: v for k, v in sensor_data.items() if k != 'meshData'}
+                    }
+                    data_log.append(log_entry)
             socketio.sleep(0.1)  # Update at 10Hz
     
     socketio.start_background_task(demo_data_generator)
@@ -279,28 +287,115 @@ def start_logging():
 @app.route('/api/stop_logging', methods=['POST'])
 def stop_logging():
     """Stop data logging and save to file"""
-    global logging_enabled
+    global logging_enabled, data_log
     logging_enabled = False
     
     # Save to CSV
     if data_log:
-        filename = f'logs/fitness_data_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
-        os.makedirs('logs', exist_ok=True)
-        
-        import csv
-        keys = data_log[0].keys()
-        with open(filename, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=keys)
-            writer.writeheader()
-            writer.writerows(data_log)
-        
-        return jsonify({
-            'status': 'logging_stopped',
-            'data_points': len(data_log),
-            'filename': filename
-        })
+        try:
+            # Create logs directory
+            logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            # Generate filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            exercise_name = sensor_data.get('exercise', 'unknown').replace(' ', '_')
+            filename = f'fitness_data_{exercise_name}_{timestamp}.csv'
+            filepath = os.path.join(logs_dir, filename)
+            
+            # Prepare data for CSV (flatten any nested structures)
+            import csv
+            csv_data = []
+            for entry in data_log:
+                flat_entry = {}
+                for key, value in entry.items():
+                    # Skip complex objects, convert simple types to strings
+                    if isinstance(value, (dict, list)):
+                        if key == 'feedback':
+                            flat_entry[key] = str(value) if value else ''
+                        # Skip other complex objects
+                    else:
+                        flat_entry[key] = value
+                csv_data.append(flat_entry)
+            
+            # Define column order for better readability
+            if csv_data:
+                all_keys = csv_data[0].keys()
+                ordered_keys = ['timestamp', 'exercise', 'repCount', 'formScore', 'feedback',
+                               'ax', 'ay', 'az', 'gx', 'gy', 'gz', 
+                               'pitch', 'roll', 'yaw', 
+                               'heartRate', 'pulse', 'beatDetected']
+                # Add any remaining keys
+                fieldnames = [k for k in ordered_keys if k in all_keys]
+                fieldnames.extend([k for k in all_keys if k not in fieldnames])
+                
+                # Write to CSV
+                with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+                    writer.writeheader()
+                    writer.writerows(csv_data)
+                
+                print(f"✓ Data logged to: {filepath}")
+                print(f"  Total data points: {len(csv_data)}")
+                
+                return jsonify({
+                    'status': 'logging_stopped',
+                    'data_points': len(csv_data),
+                    'filename': filename,
+                    'filepath': filepath
+                })
+        except Exception as e:
+            print(f"✗ Error saving CSV: {e}")
+            return jsonify({
+                'status': 'logging_stopped_with_error',
+                'data_points': len(data_log),
+                'error': str(e)
+            }), 500
     
-    return jsonify({'status': 'logging_stopped', 'data_points': 0})
+    return jsonify({'status': 'logging_stopped', 'data_points': 0, 'message': 'No data to save'})
+
+
+@app.route('/api/logs', methods=['GET'])
+def list_logs():
+    """List all available log files"""
+    logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+    
+    if not os.path.exists(logs_dir):
+        return jsonify({'logs': []})
+    
+    logs = []
+    for filename in os.listdir(logs_dir):
+        if filename.endswith('.csv'):
+            filepath = os.path.join(logs_dir, filename)
+            file_stats = os.stat(filepath)
+            logs.append({
+                'filename': filename,
+                'size': file_stats.st_size,
+                'created': datetime.fromtimestamp(file_stats.st_ctime).isoformat(),
+                'modified': datetime.fromtimestamp(file_stats.st_mtime).isoformat()
+            })
+    
+    # Sort by creation time, newest first
+    logs.sort(key=lambda x: x['created'], reverse=True)
+    
+    return jsonify({'logs': logs})
+
+
+@app.route('/api/logs/<filename>', methods=['GET'])
+def download_log(filename):
+    """Download a specific log file"""
+    logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+    
+    # Security check: prevent directory traversal
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return jsonify({'error': 'Invalid filename'}), 400
+    
+    filepath = os.path.join(logs_dir, filename)
+    
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'File not found'}), 404
+    
+    return send_from_directory(logs_dir, filename, as_attachment=True)
 
 
 @app.route('/api/reset_reps', methods=['POST'])
@@ -406,12 +501,17 @@ if __name__ == '__main__':
     print("  GET  /api/sensor_data - Current sensor data")
     print("  POST /api/connect_esp32 - Connect to ESP32")
     print("  POST /api/disconnect_esp32 - Disconnect from ESP32")
+    print("  POST /api/start_demo - Start demo mode")
+    print("  POST /api/stop_demo - Stop demo mode")
     print("  POST /api/send_command - Send command to ESP32")
     print("  POST /api/start_logging - Start data logging")
-    print("  POST /api/stop_logging - Stop and save logs")
+    print("  POST /api/stop_logging - Stop and save logs to CSV")
+    print("  GET  /api/logs - List all saved log files")
+    print("  GET  /api/logs/<filename> - Download a specific log file")
     print("  POST /api/reset_reps - Reset rep counter")
     print("  POST /api/set_exercise - Set exercise type")
     print("\nWebSocket: Real-time sensor data streaming")
+    print("Data logs will be saved to: backend/logs/")
     print("=" * 60)
     print()
     
