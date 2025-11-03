@@ -5,6 +5,7 @@ Enhanced Form Analyzer with 3D Mesh Visualization and Demo Mode
 import math
 import random
 import numpy as np
+import time
 from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
@@ -222,26 +223,26 @@ class DemoMode:
         self.exercise = 'Ready'
         self.current_angle = 0
         self.direction = 1  # 1 for up, -1 for down
-        self.speed = 2  # degrees per update
+        self.speed = 1  # degrees per update (slowed down from 2)
         self.rep_count = 0
         self.heart_rate = 70
         self.exercise_params = {
             'bicep_curl': {
                 'min_angle': 0,
                 'max_angle': 90,
-                'speed': 2,
+                'speed': 0.8,  # Slowed down from 2
                 'roll_range': (-5, 5)
             },
             'squat': {
                 'min_angle': 0,
                 'max_angle': -60,
-                'speed': 1.5,
+                'speed': 0.6,  # Slowed down from 1.5
                 'roll_range': (-10, 10)
             },
             'pushup': {
                 'min_angle': 0,
                 'max_angle': 40,
-                'speed': 1.8,
+                'speed': 0.7,  # Slowed down from 1.8
                 'roll_range': (-8, 8)
             }
         }
@@ -273,6 +274,11 @@ class DemoMode:
         base_rate = 70
         exercise_intensity = abs(self.current_angle) / 90.0
         fatigue_impact = self.fatigue_factor * 0.1
+        
+        # Store last beat time for realistic beat detection
+        if not hasattr(self, 'last_beat_time'):
+            self.last_beat_time = time.time()
+            self.beat_interval = 60.0 / self.heart_rate  # seconds between beats
         
         target_hr = base_rate + (50 * exercise_intensity) + (10 * fatigue_impact)
         current_hr = self.heart_rate
@@ -355,6 +361,34 @@ class DemoMode:
         gy = self._apply_natural_variation(self.direction * params['speed'] * 15)
         gz = self._apply_natural_variation(self.direction * params['speed'] * 10)
         
+        # Realistic beat detection based on heart rate
+        current_time = time.time()
+        beat_interval = 60.0 / self.heart_rate  # seconds between beats
+        time_since_last_beat = current_time - self.last_beat_time
+        
+        beat_detected = False
+        pulse_value = 512  # Base pulse value
+        
+        if time_since_last_beat >= beat_interval:
+            beat_detected = True
+            self.last_beat_time = current_time
+            pulse_value = 800 + random.randint(-50, 50)  # Peak value on beat
+        else:
+            # Calculate pulse waveform between beats
+            beat_phase = time_since_last_beat / beat_interval
+            if beat_phase < 0.3:
+                # Systolic peak
+                pulse_value = 512 + int(300 * math.sin(beat_phase * math.pi / 0.3))
+            elif beat_phase < 0.5:
+                # Dicrotic notch
+                pulse_value = 550 + int(50 * math.sin((beat_phase - 0.3) * math.pi / 0.2))
+            else:
+                # Diastole
+                pulse_value = 512 + int(40 * (1 - (beat_phase - 0.5) / 0.5))
+        
+        # Add realistic noise to pulse signal
+        pulse_value += random.randint(-10, 10)
+        
         return {
             'ax': ax,
             'ay': ay,
@@ -366,8 +400,8 @@ class DemoMode:
             'roll': roll,
             'yaw': random.uniform(-5, 5),
             'heartRate': int(self.heart_rate),
-            'pulse': random.randint(0, 1),
-            'beatDetected': random.random() > 0.8,
+            'pulse': pulse_value,
+            'beatDetected': beat_detected,
             'repCount': self.rep_count,
             'exercise': self.exercise
         }

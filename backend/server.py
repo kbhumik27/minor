@@ -33,7 +33,7 @@ sensor_data = {
     'ax': 0, 'ay': 0, 'az': 0,
     'gx': 0, 'gy': 0, 'gz': 0,
     'pitch': 0, 'roll': 0, 'yaw': 0,
-    'heartRate': 0, 'pulse': 0,
+    'heartRate': 70, 'pulse': 512,
     'beatDetected': False,
     'repCount': 0,
     'exercise': 'Ready',

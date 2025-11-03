@@ -14,6 +14,7 @@ import {
 import SensorVisualizer from "@/components/SensorVisualizer";
 import RepCounter from "@/components/RepCounter";
 import FormFeedback from "@/components/FormFeedback";
+import HeartRateWaveform from "@/components/HeartRateWaveform";
 import io from "socket.io-client";
 
 interface SensorData {
@@ -480,28 +481,11 @@ const Dashboard = () => {
             )}
 
             {/* Key Metrics Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <RepCounter 
                 repCount={sensorData.repCount} 
                 exercise={sensorData.exercise}
               />
-              
-              <Card className="bg-gradient-to-br from-red-500/10 to-pink-500/10 backdrop-blur-xl border-red-500/30 hover:shadow-glow hover:shadow-red-500/20 transition-all duration-300">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Heart className="w-5 h-5 text-red-500 animate-pulse" />
-                    Heart Rate
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-5xl font-bold text-red-500 mb-2">
-                    {sensorData.heartRate}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    BPM • Pulse: {sensorData.pulse}
-                  </div>
-                </CardContent>
-              </Card>
 
               <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 backdrop-blur-xl border-blue-500/30 hover:shadow-glow hover:shadow-blue-500/20 transition-all duration-300">
                 <CardHeader>
@@ -520,6 +504,15 @@ const Dashboard = () => {
                   </div>
                 </CardContent>
               </Card>
+            </div>
+
+            {/* Heart Rate Waveform */}
+            <div className="mb-8">
+              <HeartRateWaveform 
+                heartRate={sensorData.heartRate}
+                pulse={sensorData.pulse}
+                beatDetected={sensorData.beatDetected}
+              />
             </div>
 
             {/* Main Content Grid */}

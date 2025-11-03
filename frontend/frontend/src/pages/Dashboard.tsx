@@ -13,6 +13,7 @@ import SensorVisualizer from "@/components/SensorVisualizer";
 import RepCounter from "@/components/RepCounter";
 import FormFeedback from "@/components/FormFeedback";
 import HumanVisualizer from "@/components/HumanVisualizer";
+import { HeartRateMonitor } from "@/components/HeartRateMonitor";
 import io from "socket.io-client";
 
 interface SensorData {
@@ -297,7 +298,8 @@ const Dashboard = () => {
             </div>
 
             <div className="grid lg:grid-cols-3 gap-8 mb-8">
-              <div className="lg:col-span-2">
+              <div className="lg:col-span-2 space-y-6">
+                {/* Sensor Visualization */}
                 <div className="glass-card p-6">
                   <h3 className="text-lg font-semibold mb-4">Live Sensor Visualization</h3>
                   <div className="grid md:grid-cols-2 gap-6">
@@ -310,7 +312,9 @@ const Dashboard = () => {
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mt-6">
+
+                {/* Orientation Metrics */}
+                <div className="grid grid-cols-2 gap-4">
                   <div className="glass-card p-4">
                     <div className="text-sm text-muted-foreground">Pitch</div>
                     <div className="text-2xl font-bold">{sensorData.pitch.toFixed(1)}°</div>
@@ -320,6 +324,9 @@ const Dashboard = () => {
                     <div className="text-2xl font-bold">{sensorData.roll.toFixed(1)}°</div>
                   </div>
                 </div>
+
+                {/* Heart Rate Monitor - Moved Down */}
+                <HeartRateMonitor sensorData={sensorData} />
               </div>
 
               <div className="space-y-6">
