@@ -77,8 +77,16 @@ async def connect_to_esp32(esp32_url):
                     message = await asyncio.wait_for(websocket.recv(), timeout=5.0)
                     data = json.loads(message)
                     
-                    # Update global state
+                    # Update global state with ESP32 data
                     sensor_data.update(data)
+                    
+                    # IMPORTANT: Preserve heart rate data from ESP32
+                    if 'heartRate' in data:
+                        sensor_data['heartRate'] = data['heartRate']
+                    if 'pulse' in data:
+                        sensor_data['pulse'] = data['pulse']
+                    if 'beatDetected' in data:
+                        sensor_data['beatDetected'] = data['beatDetected']
                     
                     # Add to buffer for AI
                     sensor_buffer.append([
@@ -92,7 +100,8 @@ async def connect_to_esp32(esp32_url):
                         score, feedback, rep_detected = form_analyzer.analyze(
                             sensor_data.get('exercise', 'squat'),
                             data.get('pitch', 0),
-                            data.get('roll', 0)
+                            data.get('roll', 0),
+                            data  # Pass full ESP32 data to prevent synthetic HR generation
                         )
                         
                         sensor_data['formScore'] = score
@@ -104,6 +113,9 @@ async def connect_to_esp32(esp32_url):
                         # Increment rep count if detected
                         if rep_detected:
                             sensor_data['repCount'] = sensor_data.get('repCount', 0) + 1
+                    
+                    # Debug print to verify heart rate is being received
+                    print(f"ESP32 Data - HR: {sensor_data.get('heartRate', 'N/A')}, Pulse: {sensor_data.get('pulse', 'N/A')}, Beat: {sensor_data.get('beatDetected', 'N/A')}")
                     
                     # Broadcast to all connected clients
                     socketio.emit('sensor_data', sensor_data)
@@ -165,7 +177,8 @@ def get_status():
         'esp32_connected': connected_to_esp32,
         'clients_connected': clients_count,
         'logging_enabled': logging_enabled,
-        'data_points_logged': len(data_log)
+        'data_points_logged': len(data_log),
+        'demo_mode': demo_mode
     })
 
 
@@ -178,8 +191,12 @@ def get_sensor_data():
 @app.route('/api/connect_esp32', methods=['POST'])
 def connect_esp32_endpoint():
     """Connect to ESP32"""
+    global demo_mode
     data = request.json
     esp32_url = data.get('url', 'ws://192.168.1.100:81')
+    
+    # Stop demo mode when connecting to real ESP32
+    demo_mode = False
     
     # Start connection in background thread
     thread = threading.Thread(target=run_esp32_connection, args=(esp32_url,))
@@ -231,6 +248,7 @@ def start_demo():
                 sensor_data['formScore'] = score
                 sensor_data['feedback'] = ' | '.join(feedback) if feedback else ''
                 sensor_data['meshData'] = form_analyzer.get_mesh_data()
+                sensor_data['demoMode'] = True
                 
                 # Broadcast to clients
                 socketio.emit('sensor_data', sensor_data)

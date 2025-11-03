@@ -453,6 +453,12 @@ class FormAnalyzer:
         feedback = []
         rep_detected = False
 
+        # Only generate heart rate in demo mode or if not provided by sensor_data
+        generate_heart_rate = self.demo_mode.running or (sensor_data and 'heartRate' not in sensor_data)
+        
+        if generate_heart_rate:
+            self.demo_mode._update_heart_rate()
+
         # Update 3D mesh visualization
         self.mesh.update_joint_positions(pitch, roll, exercise)
         

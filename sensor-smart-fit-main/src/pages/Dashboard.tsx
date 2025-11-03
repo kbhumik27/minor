@@ -73,6 +73,14 @@ const Dashboard = () => {
 
     socket.on("sensor_data", (data: SensorData) => {
       setSensorData(data);
+      
+      // Debug log to verify heart rate data is being received
+      console.log('Received sensor data:', {
+        heartRate: data.heartRate,
+        pulse: data.pulse,
+        beatDetected: data.beatDetected,
+        timestamp: new Date().toISOString()
+      });
     });
 
     socket.on("esp32_status", (status: { connected: boolean; error?: string }) => {
