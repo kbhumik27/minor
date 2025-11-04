@@ -9,6 +9,9 @@ import time
 from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
+from collections import deque
+import joblib
+import os
 
 @dataclass
 class Point3D:
@@ -118,80 +121,6 @@ class HumanMesh:
             0.02 * math.cos(roll_rad)
         )
     
-    def _update_squat(self, pitch_rad: float, roll_rad: float):
-        """Update mesh for squat movement with full body adjustment"""
-        # Calculate vertical displacement for squat depth
-        squat_depth = 0.3 * math.sin(-pitch_rad)  # More pronounced movement
-        
-        # Adjust hip and leg positions
-        self.joints['hip'].position = Point3D(
-            0.05 * math.sin(roll_rad),
-            max(0.1, squat_depth),  # Prevent going below ground
-            0.05 * math.cos(roll_rad)
-        )
-        
-        # Update leg chain positions
-        knee_bend = 0.25 * (1 - math.cos(pitch_rad))
-        for side in ['left', 'right']:
-            x_offset = -0.15 if side == 'left' else 0.15
-            
-            # Adjust knee position
-            self.joints[f'{side}_knee'].position = Point3D(
-                x_offset + 0.05 * math.sin(roll_rad),
-                -0.25 - knee_bend,
-                0.1 * math.cos(pitch_rad)
-            )
-            
-            # Adjust ankle position
-            self.joints[f'{side}_ankle'].position = Point3D(
-                x_offset + 0.02 * math.sin(roll_rad),
-                -0.5,
-                0.05 * math.cos(pitch_rad)
-            )
-        
-        # Adjust upper body lean
-        self.joints['spine'].position = Point3D(
-            0.1 * math.sin(roll_rad),
-            0.3 + squat_depth,
-            -0.1 * math.sin(pitch_rad)
-        )
-    
-    def _update_pushup(self, pitch_rad: float, roll_rad: float):
-        """Update mesh for pushup movement"""
-        # Calculate body height adjustment
-        body_height = 0.3 * (1 + math.cos(pitch_rad))
-        
-        # Adjust core body position
-        self.joints['hip'].position = Point3D(
-            0.05 * math.sin(roll_rad),
-            body_height,
-            0
-        )
-        
-        # Update arm positions
-        for side in ['left', 'right']:
-            x_offset = -0.2 if side == 'left' else 0.2
-            
-            # Shoulder position
-            self.joints[f'{side}_shoulder'].position = Point3D(
-                x_offset + 0.05 * math.sin(roll_rad),
-                body_height + 0.3,
-                0.1 * math.cos(pitch_rad)
-            )
-            
-            # Elbow position
-            self.joints[f'{side}_elbow'].position = Point3D(
-                x_offset + 0.1 * math.sin(roll_rad),
-                body_height + 0.15,
-                0.15 * math.cos(pitch_rad)
-            )
-            
-            # Wrist/hand position (fixed on ground)
-            self.joints[f'{side}_wrist'].position = Point3D(
-                x_offset,
-                0.1,  # Slightly above ground
-                0.2
-            )
     
     def reset_positions(self):
         """Reset all joints to their initial positions"""
@@ -244,6 +173,12 @@ class DemoMode:
                 'max_angle': 40,
                 'speed': 0.7,  # Slowed down from 1.8
                 'roll_range': (-8, 8)
+            },
+            'running': {
+                'min_angle': 0,
+                'max_angle': 0,  # No arm angle for running
+                'speed': 0,
+                'roll_range': (-3, 3)
             }
         }
         self.transition_state = None
@@ -298,6 +233,11 @@ class DemoMode:
         """Generate realistic acceleration data based on movement"""
         params = self.exercise_params.get(self.exercise, {})
         
+        # Initialize step simulation variables if not present
+        if not hasattr(self, 'step_phase'):
+            self.step_phase = 0.0
+            self.step_frequency = 1.8  # Hz (108 steps per minute for running)
+        
         # Base acceleration affected by movement and fatigue
         ax = random.uniform(-0.1, 0.1) * (1 + self.fatigue_factor * 0.2)
         ay = random.uniform(-0.1, 0.1) * (1 + self.fatigue_factor * 0.2)
@@ -312,6 +252,29 @@ class DemoMode:
         elif self.exercise == 'bicep_curl':
             ax += movement_factor * math.cos(math.radians(self.current_angle))
             ay += movement_factor * math.sin(math.radians(self.current_angle))
+        elif self.exercise == 'running':
+            # Generate realistic running gait pattern
+            # Update step phase (assuming ~10Hz update rate)
+            self.step_phase += self.step_frequency * 0.1  # 0.1s per update
+            
+            # Create vertical acceleration pattern typical of running
+            # Each step creates a sharp peak in vertical acceleration
+            step_pattern = math.sin(2 * math.pi * self.step_phase)
+            impact_pattern = max(0, math.sin(2 * math.pi * self.step_phase)) ** 3
+            
+            # Add step impact to vertical (y-axis) acceleration
+            ay += 0.8 * impact_pattern  # Strong vertical impact
+            
+            # Add forward-backward oscillation (x-axis)
+            ax += 0.3 * step_pattern
+            
+            # Add some vertical bounce to z-axis
+            az += 0.4 * impact_pattern
+            
+            # Add realistic variation
+            ax += random.uniform(-0.15, 0.15)
+            ay += random.uniform(-0.1, 0.1)
+            az += random.uniform(-0.1, 0.1)
             
         return ax, ay, az
     
@@ -337,8 +300,8 @@ class DemoMode:
             else:
                 self.transition_state = None
         
-        # Update movement
-        if self.running:
+        # Update movement (not for running which is continuous)
+        if self.running and self.exercise != 'running':
             self.current_angle += self.direction * params['speed']
             
             # Check for rep completion and direction changes
@@ -348,8 +311,8 @@ class DemoMode:
             elif self.direction == -1 and self.current_angle <= params['min_angle']:
                 self.direction = 1
                 self.rep_count += 1
-                
-        # Generate sensor data
+        
+        # Generate sensor data with realistic step patterns for running
         ax, ay, az = self._get_acceleration_data()
         roll = random.uniform(*params['roll_range']) * (1 + self.fatigue_factor * 0.3)
         
@@ -357,38 +320,34 @@ class DemoMode:
         self._update_heart_rate()
         
         # Calculate angular velocities based on movement
-        gx = self._apply_natural_variation(self.direction * params['speed'] * 20)
-        gy = self._apply_natural_variation(self.direction * params['speed'] * 15)
-        gz = self._apply_natural_variation(self.direction * params['speed'] * 10)
+        if self.exercise == 'running':
+            # Running has different gyro patterns - arm swing motion
+            gx = self._apply_natural_variation(50 * math.sin(2 * math.pi * self.step_phase))
+            gy = self._apply_natural_variation(30 * math.cos(2 * math.pi * self.step_phase))
+            gz = self._apply_natural_variation(20 * math.sin(4 * math.pi * self.step_phase))
+        else:
+            gx = self._apply_natural_variation(self.direction * params['speed'] * 20)
+            gy = self._apply_natural_variation(self.direction * params['speed'] * 15)
+            gz = self._apply_natural_variation(self.direction * params['speed'] * 10)
         
-        # Realistic beat detection based on heart rate
+        # FIXED: Realistic pulse values (60-100 BPM range, not ADC values)
+        # Pulse should match heart rate, not be in 512-800 range
         current_time = time.time()
         beat_interval = 60.0 / self.heart_rate  # seconds between beats
         time_since_last_beat = current_time - self.last_beat_time
         
         beat_detected = False
-        pulse_value = 512  # Base pulse value
         
+        # Check if it's time for a heartbeat
         if time_since_last_beat >= beat_interval:
             beat_detected = True
             self.last_beat_time = current_time
-            pulse_value = 800 + random.randint(-50, 50)  # Peak value on beat
-        else:
-            # Calculate pulse waveform between beats
-            beat_phase = time_since_last_beat / beat_interval
-            if beat_phase < 0.3:
-                # Systolic peak
-                pulse_value = 512 + int(300 * math.sin(beat_phase * math.pi / 0.3))
-            elif beat_phase < 0.5:
-                # Dicrotic notch
-                pulse_value = 550 + int(50 * math.sin((beat_phase - 0.3) * math.pi / 0.2))
-            else:
-                # Diastole
-                pulse_value = 512 + int(40 * (1 - (beat_phase - 0.5) / 0.5))
         
-        # Add realistic noise to pulse signal
-        pulse_value += random.randint(-10, 10)
+        # Add realistic noise to heart rate
+        displayed_hr = int(self.heart_rate + random.randint(-2, 2))
+        displayed_hr = max(60, min(180, displayed_hr))  # Clamp to realistic range
         
+        # Include timestamp for step detection
         return {
             'ax': ax,
             'ay': ay,
@@ -399,11 +358,12 @@ class DemoMode:
             'pitch': self._apply_natural_variation(self.current_angle),
             'roll': roll,
             'yaw': random.uniform(-5, 5),
-            'heartRate': int(self.heart_rate),
-            'pulse': pulse_value,
+            'heartRate': displayed_hr,  # Realistic BPM value
+            'pulse': displayed_hr,  # Pulse matches heart rate in BPM
             'beatDetected': beat_detected,
             'repCount': self.rep_count,
-            'exercise': self.exercise
+            'exercise': self.exercise,
+            'timestamp': current_time  # Include timestamp for step detection
         }
 
 class FormAnalyzer:
@@ -413,20 +373,6 @@ class FormAnalyzer:
         self.mesh = HumanMesh()
         self.demo_mode = DemoMode()
         self.thresholds = {
-            'squat': {
-                'min_depth': -40, 
-                'max_depth': -90,
-                'max_roll': 15,
-                'ideal_tempo': 3.0,  # seconds per rep
-                'tempo_range': 1.0   # allowed deviation
-            },
-            'pushup': {
-                'min_depth': 20,
-                'max_depth': 40,
-                'max_roll': 15,
-                'ideal_tempo': 2.0,
-                'tempo_range': 0.5
-            },
             'bicep_curl': {
                 'min_curl': 60,
                 'max_curl': 120,
@@ -434,6 +380,20 @@ class FormAnalyzer:
                 'target_curl': 90,
                 'ideal_tempo': 2.0,
                 'tempo_range': 0.5
+            },
+            'lateral_raise': {
+                'min_raise': 20,
+                'max_raise': 100,
+                'max_roll': 12,
+                'ideal_tempo': 2.0,
+                'tempo_range': 0.6
+            },
+            'shoulder_press': {
+                'min_press': 30,
+                'max_press': 120,
+                'max_roll': 12,
+                'ideal_tempo': 2.2,
+                'tempo_range': 0.6
             }
         }
         self.rep_state = 'up'
@@ -446,6 +406,54 @@ class FormAnalyzer:
         self.last_rep_time = None
         self.rep_durations = []     # Track rep timing
         self.range_of_motion = {'min': 0, 'max': 0}  # Track ROM
+        
+        # Wrist / activity tracking
+        self.placement = 'wrist'
+        self.mode = 'normal'  # 'normal' or 'workout'
+        self.step_count = 0
+        self._last_step_time = None
+        self._step_buffer = deque(maxlen=100)  # Increased buffer for better detection
+        self._last_metric_time = None
+        self.latest_metrics = {
+            'stepCount': 0,
+            'stepDetected': False,
+            'activity': 'unknown',
+            'activityConfidence': 0.0,
+            'runningSpeedKmh': 0.0,
+            'caloriesTotal': 0.0
+        }
+
+        # User profile (can be updated via API). Defaults reasonable placeholders.
+        self.user_height_cm = 170.0
+        self.user_weight_kg = 70.0
+        self.user_age = 30
+
+        # Calorie accumulation
+        self._calories_accum = 0.0
+        
+        # Load trained activity classifier model
+        self.activity_model = None
+        self._load_activity_model()
+        
+        # Step detection parameters
+        self._step_threshold = 1.2  # g-force threshold for step detection
+        self._min_step_interval = 0.3  # Minimum 300ms between steps
+        self._max_step_interval = 2.0  # Maximum 2s between steps
+        self._peak_buffer = deque(maxlen=10)  # Track recent peaks
+    
+    def _load_activity_model(self):
+        """Load the trained activity classifier model"""
+        model_path = os.path.join(os.path.dirname(__file__), 'model.joblib')
+        try:
+            if os.path.exists(model_path):
+                self.activity_model = joblib.load(model_path)
+                print(f"✓ Activity classifier model loaded from {model_path}")
+            else:
+                print(f"⚠ Activity model not found at {model_path}")
+                self.activity_model = None
+        except Exception as e:
+            print(f"✗ Error loading activity model: {e}")
+            self.activity_model = None
     
     def analyze(self, exercise, pitch, roll, sensor_data=None):
         """Analyze form and detect reps with enhanced feedback"""
@@ -465,15 +473,20 @@ class FormAnalyzer:
         # Store movement data for temporal analysis
         self._update_movement_history(pitch, roll)
         
-        # Get exercise-specific analysis
-        if exercise == 'squat':
-            score, feedback, rep_detected = self._analyze_squat(pitch, roll)
-        elif exercise == 'pushup':
-            score, feedback, rep_detected = self._analyze_pushup(pitch, roll)
-        elif exercise == 'bicep_curl':
+        # Get exercise-specific analysis (wrist-compatible exercises only)
+        if exercise == 'bicep_curl':
             score, feedback, rep_detected = self._analyze_bicep_curl(pitch, roll, sensor_data)
+        elif exercise == 'lateral_raise':
+            score, feedback, rep_detected = self._analyze_lateral_raise(pitch, roll, sensor_data)
+        elif exercise == 'shoulder_press':
+            score, feedback, rep_detected = self._analyze_shoulder_press(pitch, roll, sensor_data)
+        elif exercise == 'running':
+            # Running handled primarily by activity/step detection
+            score = 100
+            feedback = ["Running mode: use steps and heart rate metrics"]
+            rep_detected = False
         else:
-            return 0, ["Select an exercise to begin"], False
+            return 0, ["Select a wrist-compatible exercise to begin"], False
             
         # Add tempo-based feedback
         if sensor_data:
@@ -489,7 +502,15 @@ class FormAnalyzer:
 
         self.current_form_score = score
         self.current_feedback = feedback
-        
+
+        # Process wrist/normal-mode analytics (steps, activity, calories, speed)
+        if sensor_data is not None:
+            try:
+                self._process_activity_and_steps(sensor_data)
+            except Exception:
+                # Keep analysis robust - don't fail entire pipeline on analytics
+                pass
+
         return score, feedback, rep_detected
 
     def _analyze_bicep_curl(self, pitch, roll, sensor_data=None):
@@ -569,134 +590,66 @@ class FormAnalyzer:
         
         return score, feedback, rep_detected
 
-    def _analyze_squat(self, pitch, roll):
-        """Analyze squat form with detailed feedback"""
+    def _analyze_lateral_raise(self, pitch, roll, sensor_data=None):
+        """Simple lateral raise analysis for wrist-worn IMU"""
         score = 100
         feedback = []
         rep_detected = False
-        thresholds = self.thresholds['squat']
-        
-        # Detect and analyze downward phase
-        if self.rep_state == 'up' and pitch < -30:
-            self.rep_state = 'down'
-            
-            # Depth analysis
-            if pitch < thresholds['max_depth']:
-                feedback.append("⚠️ Too deep - maintain control")
-                score -= 15
-            elif pitch < -50:
-                feedback.append("🎯 Perfect depth!")
-                score = 100
-            elif pitch < thresholds['min_depth']:
-                feedback.append("✓ Good depth - focus on control")
-                score = 90
-            else:
-                feedback.append("⚠ Not deep enough - aim for parallel")
-                score = 70
-            
-            # Check descent speed using gyro data
-            if len(self.movement_history) >= 2:
-                time_diff = (self.movement_history[-1]['timestamp'] - 
-                           self.movement_history[-2]['timestamp']).total_seconds()
-                if time_diff < 0.5:
-                    feedback.append("⚠ Control the descent - slower")
-                    score -= 10
-        
-        # Detect and analyze upward phase
-        elif self.rep_state == 'down' and pitch > -10:
+        thresholds = self.thresholds.get('lateral_raise', {})
+
+        min_raise = thresholds.get('min_raise', 20)
+        max_raise = thresholds.get('max_raise', 100)
+        max_roll = thresholds.get('max_roll', 12)
+
+        # Detect raise phase (pitch increasing beyond min_raise)
+        if self.rep_state == 'down' and pitch > min_raise:
             self.rep_state = 'up'
-            rep_detected = True
-            
-            # Check full extension
-            if pitch < 0:
-                feedback.append("⚠ Stand fully at the top")
+            if pitch > max_raise:
+                feedback.append("⚠️ Too high - control the raise")
                 score -= 10
             else:
-                feedback.append("✓ Good extension!")
-            
-            # Update rep metrics
+                feedback.append("✓ Good raise")
+
+        elif self.rep_state == 'up' and pitch < min_raise:
+            self.rep_state = 'down'
+            rep_detected = True
             self._update_rep_metrics(datetime.now())
-        
-        # Analyze lateral stability
-        if abs(roll) > thresholds['max_roll']:
-            score -= 20
-            if roll > 0:
-                feedback.append("⚠ Leaning right - center weight")
-            else:
-                feedback.append("⚠ Leaning left - center weight")
-        
-        # Check range of motion consistency
-        if rep_detected and self.last_rep_count > 0:
-            current_rom = self.range_of_motion['max'] - self.range_of_motion['min']
-            if current_rom < thresholds['min_depth'] * 0.8:
-                feedback.append("⚠ Maintain consistent depth")
-                score -= 15
-        
+
+        if abs(roll) > max_roll:
+            feedback.append("⚠ Keep wrist steady")
+            score -= 10
+
         return score, feedback, rep_detected
 
-    def _analyze_pushup(self, pitch, roll):
-        """Analyze pushup form with detailed feedback"""
+    def _analyze_shoulder_press(self, pitch, roll, sensor_data=None):
+        """Simple shoulder press analysis for wrist-worn IMU"""
         score = 100
         feedback = []
         rep_detected = False
-        thresholds = self.thresholds['pushup']
-        
-        # Analyze downward phase (lowering)
-        if self.rep_state == 'up' and pitch > thresholds['min_depth']:
-            self.rep_state = 'down'
-            
-            # Check chest dip depth
-            if pitch > thresholds['max_depth']:
-                feedback.append("⚠️ Too low - risk of shoulder strain")
-                score -= 20
-            elif pitch > thresholds['min_depth'] + 10:
-                feedback.append("💪 Perfect depth!")
-                score = 100
-            else:
-                feedback.append("↓ Lower chest a bit more")
-                score = 85
-            
-            # Check shoulder alignment
-            if abs(roll) > thresholds['max_roll']:
-                feedback.append("⚠ Keep shoulders level")
-                score -= 15
-            
-            # Analyze descent control
-            if len(self.movement_history) >= 2:
-                time_diff = (self.movement_history[-1]['timestamp'] - 
-                           self.movement_history[-2]['timestamp']).total_seconds()
-                if time_diff < 0.3:
-                    feedback.append("⚠ Control the descent")
-                    score -= 10
-        
-        # Analyze upward phase (pushing up)
-        elif self.rep_state == 'down' and pitch < 5:
+        thresholds = self.thresholds.get('shoulder_press', {})
+
+        min_press = thresholds.get('min_press', 30)
+        max_press = thresholds.get('max_press', 120)
+        max_roll = thresholds.get('max_roll', 12)
+
+        # Press up detection
+        if self.rep_state == 'down' and pitch > min_press:
             self.rep_state = 'up'
-            rep_detected = True
-            
-            # Check extension
-            if pitch > 0:
-                feedback.append("✓ Full extension - good!")
+            if pitch > max_press:
+                feedback.append("⚠️ Overextension")
+                score -= 10
             else:
-                feedback.append("↑ Push up completely")
-                score -= 10
-            
-            # Update rep tracking
+                feedback.append("✓ Good press")
+
+        elif self.rep_state == 'up' and pitch < min_press:
+            self.rep_state = 'down'
+            rep_detected = True
             self._update_rep_metrics(datetime.now())
-        
-        # Analyze body alignment throughout movement
-        if len(self.movement_history) >= 3:
-            recent_rolls = [m['roll'] for m in self.movement_history[-3:]]
-            if any(abs(r) > thresholds['max_roll'] for r in recent_rolls):
-                feedback.append("⚠ Keep body straight - check core")
-                score -= 15
-            
-            # Check for consistent form
-            pitch_variance = np.var([m['pitch'] for m in self.movement_history[-3:]])
-            if pitch_variance > 100:
-                feedback.append("⚠ Maintain steady pace")
-                score -= 10
-        
+
+        if abs(roll) > max_roll:
+            feedback.append("⚠ Keep elbows steady")
+            score -= 12
+
         return score, feedback, rep_detected
 
     def _update_movement_history(self, pitch, roll):
@@ -793,3 +746,214 @@ class FormAnalyzer:
     def get_demo_data(self):
         """Get next frame of demo data"""
         return self.demo_mode.get_next_data()
+
+    def set_user_profile(self, height_cm=None, weight_kg=None, age=None):
+        """Update user profile used for calorie and speed estimation"""
+        if height_cm is not None:
+            self.user_height_cm = float(height_cm)
+        if weight_kg is not None:
+            self.user_weight_kg = float(weight_kg)
+        if age is not None:
+            self.user_age = int(age)
+
+    def set_mode(self, mode: str):
+        """Set analyzer mode: 'normal' or 'workout'"""
+        if mode in ('normal', 'workout'):
+            self.mode = mode
+
+    def _process_activity_and_steps(self, sensor_data):
+        """Improved step detection and activity classification using trained model"""
+        ts = None
+        if 'timestamp' in sensor_data and sensor_data['timestamp']:
+            try:
+                ts = float(sensor_data['timestamp'])
+            except Exception:
+                try:
+                    ts = datetime.fromisoformat(sensor_data['timestamp']).timestamp()
+                except Exception:
+                    ts = datetime.now().timestamp()
+        else:
+            ts = datetime.now().timestamp()
+
+        # Get actual sensor readings from MPU6050
+        ax = float(sensor_data.get('ax', 0.0) or 0.0)
+        ay = float(sensor_data.get('ay', 0.0) or 0.0)
+        az = float(sensor_data.get('az', 0.0) or 0.0)
+        gx = float(sensor_data.get('gx', 0.0) or 0.0)
+        gy = float(sensor_data.get('gy', 0.0) or 0.0)
+        gz = float(sensor_data.get('gz', 0.0) or 0.0)
+
+        # Calculate acceleration magnitude (remove gravity bias)
+        acc_magnitude = math.sqrt(ax*ax + ay*ay + az*az)
+        
+        # Append to buffer
+        self._step_buffer.append((ts, acc_magnitude))
+
+        # IMPROVED STEP DETECTION ALGORITHM
+        step_detected = False
+        now = ts
+        
+        # Only detect steps if enough data in buffer
+        if len(self._step_buffer) >= 5:
+            # Get recent magnitudes
+            recent_mags = [m for _, m in list(self._step_buffer)[-10:]]
+            current_mag = acc_magnitude
+            
+            # Calculate dynamic threshold based on moving average and std
+            window_mags = [m for _, m in self._step_buffer]
+            mean_mag = float(np.mean(window_mags))
+            std_mag = float(np.std(window_mags))
+            
+            # Adaptive threshold: mean + 1.5*std (more robust than fixed threshold)
+            threshold = mean_mag + max(0.3, 1.5 * std_mag)
+            
+            # Peak detection: current value is a local maximum above threshold
+            if len(recent_mags) >= 5:
+                mid_idx = 2  # Check if the middle value is a peak
+                is_peak = (recent_mags[mid_idx] > threshold and
+                          recent_mags[mid_idx] > recent_mags[mid_idx-1] and
+                          recent_mags[mid_idx] > recent_mags[mid_idx-2] and
+                          recent_mags[mid_idx] > recent_mags[mid_idx+1] and
+                          recent_mags[mid_idx] > recent_mags[mid_idx+2])
+                
+                # Verify time constraint between steps
+                if is_peak:
+                    if self._last_step_time is None:
+                        step_detected = True
+                        self._last_step_time = now
+                    else:
+                        time_since_last = now - self._last_step_time
+                        if self._min_step_interval <= time_since_last <= self._max_step_interval:
+                            step_detected = True
+                            self._last_step_time = now
+                            self.step_count += 1
+
+        # Calculate cadence (steps per minute) using last 10 seconds
+        window_start = now - 10.0
+        steps_recent = [t for t, _ in self._step_buffer if t >= window_start]
+        steps_in_window = len([t for t in steps_recent if t >= window_start - 0.5])  # Count actual steps
+        cadence_spm = steps_in_window * 6  # Scale 10s window to per-minute
+
+        # ACTIVITY CLASSIFICATION using trained model
+        activity = 'stationary'
+        confidence = 0.5
+        
+        if self.activity_model is not None and self.mode == 'normal':
+            try:
+                # Prepare features for the model (match training feature set)
+                # Typical features: ax, ay, az, gx, gy, gz, acc_mag, gyro_mag
+                gyro_magnitude = math.sqrt(gx*gx + gy*gy + gz*gz)
+                
+                features = np.array([[ax, ay, az, gx, gy, gz, acc_magnitude, gyro_magnitude]])
+                
+                # Predict activity
+                prediction = self.activity_model.predict(features)[0]
+                
+                # Get confidence if model supports predict_proba
+                if hasattr(self.activity_model, 'predict_proba'):
+                    proba = self.activity_model.predict_proba(features)[0]
+                    confidence = float(np.max(proba))
+                else:
+                    confidence = 0.8  # Default confidence if not available
+                
+                activity = str(prediction).lower()
+                
+            except Exception as e:
+                print(f"⚠ Activity prediction error: {e}")
+                # Fallback to simple heuristic
+                activity, confidence = self._simple_activity_classification(
+                    cadence_spm, acc_magnitude, gyro_magnitude
+                )
+        else:
+            # Fallback to simple heuristic when model not available or in workout mode
+            gyro_magnitude = math.sqrt(gx*gx + gy*gy + gz*gz)
+            activity, confidence = self._simple_activity_classification(
+                cadence_spm, acc_magnitude, gyro_magnitude
+            )
+
+        # Running speed estimation using MPU6050 step detection
+        height_m = max(0.5, self.user_height_cm / 100.0)
+        
+        if activity == 'running':
+            stride_m = 0.65 * height_m
+        elif activity == 'walking':
+            stride_m = 0.415 * height_m
+        else:
+            stride_m = 0.0
+
+        running_speed_m_s = (cadence_spm / 60.0) * stride_m
+        running_speed_kmh = running_speed_m_s * 3.6
+
+        # ✅ CALORIE ESTIMATION - Uses actual MAX30100 heart rate readings
+        # Get actual heart rate from MAX30100 sensor
+        hr = float(sensor_data.get('heartRate', 0) or 0)
+        calories_increment = 0.0
+        
+        if self._last_metric_time is None:
+            self._last_metric_time = now
+
+        dt = max(0.0, now - self._last_metric_time)
+        minutes = dt / 60.0 if dt > 0 else 0.0
+
+        # PRIORITY: Use heart rate if available from MAX30100
+        if hr > 0 and hr < 200 and minutes > 0:  # Validate HR is in reasonable range
+            # HR-based calorie formula (gender-neutral approximation)
+            # Formula: Calories/min = (-55.0969 + (0.6309 × HR) + (0.1988 × Weight) + (0.2017 × Age)) / 4.184
+            # This is a research-backed formula that uses actual heart rate
+            calories_per_min = (-55.0969 + 0.6309 * hr + 0.1988 * self.user_weight_kg + 0.2017 * self.user_age) / 4.184
+            
+            # Ensure non-negative
+            if calories_per_min < 0:
+                calories_per_min = 0.0
+                
+            calories_increment = calories_per_min * minutes
+            
+            # Debug log to verify HR is being used
+            if minutes > 0:
+                print(f"💓 Calorie calc using MAX30100 HR: {hr} BPM → {calories_per_min:.2f} kcal/min")
+        else:
+            # FALLBACK: MET-based approximation when HR not available
+            # Uses MPU6050 activity detection to estimate METs
+            met = 1.0  # Resting
+            if activity == 'walking':
+                met = 3.5
+            elif activity == 'running':
+                met = 9.8
+            
+            # MET formula: Calories = MET × weight(kg) × time(hours)
+            calories_increment = met * self.user_weight_kg * (minutes / 60.0)
+            
+            if minutes > 0:
+                print(f"⚠ Calorie calc using MET fallback (no HR): activity={activity}, MET={met}")
+
+        self._calories_accum += calories_increment
+        self._last_metric_time = now
+
+        # Update latest metrics
+        self.latest_metrics = {
+            'stepCount': int(self.step_count),
+            'stepDetected': bool(step_detected),
+            'activity': activity,
+            'activityConfidence': float(confidence),
+            'runningSpeedKmh': float(round(running_speed_kmh, 2)),
+            'caloriesTotal': float(round(self._calories_accum, 4))
+        }
+
+        return self.latest_metrics
+    
+    def _simple_activity_classification(self, cadence_spm, acc_mag, gyro_mag):
+        """Fallback activity classification using simple heuristics"""
+        activity = 'stationary'
+        confidence = 0.5
+        
+        if cadence_spm >= 80 or gyro_mag > 200:
+            activity = 'running'
+            confidence = min(1.0, 0.5 + (cadence_spm - 80) / 120.0)
+        elif cadence_spm >= 10 or acc_mag > 1.1:
+            activity = 'walking'
+            confidence = min(0.9, 0.3 + cadence_spm / 120.0)
+        else:
+            activity = 'stationary'
+            confidence = 0.6 if gyro_mag > 50 else 0.9
+            
+        return activity, confidence

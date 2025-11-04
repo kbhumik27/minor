@@ -34,6 +34,13 @@ interface SensorData {
   exercise: string;
   formScore?: number;
   feedback?: string;
+  stepCount?: number;
+  stepDetected?: boolean;
+  activity?: string;
+  activityConfidence?: number;
+  runningSpeedKmh?: number;
+  caloriesTotal?: number;
+  mode?: string;
   timestamp: number;
   meshData?: {
     joints: {
@@ -55,7 +62,11 @@ const Dashboard = () => {
     heartRate: 0, pulse: 0, beatDetected: false,
     repCount: 0, exercise: "Ready", timestamp: 0
   });
-  const [selectedExercise, setSelectedExercise] = useState("squat");
+  const [selectedExercise, setSelectedExercise] = useState("bicep_curl");
+  const [mode, setMode] = useState<string>("normal");
+  const [heightCm, setHeightCm] = useState<number | ''>(170);
+  const [weightKg, setWeightKg] = useState<number | ''>(70);
+  const [age, setAge] = useState<number | ''>(30);
   const [isLogging, setIsLogging] = useState(false);
   const [availableLogs, setAvailableLogs] = useState<{filename: string; size: number; created: string}[]>([]);
   const [showLogs, setShowLogs] = useState(false);
@@ -73,6 +84,7 @@ const Dashboard = () => {
 
     socket.on("sensor_data", (data: SensorData) => {
       setSensorData(data);
+      if (data.mode) setMode(data.mode);
       
       // Debug log to verify heart rate data is being received
       console.log('Received sensor data:', {
@@ -198,6 +210,54 @@ const Dashboard = () => {
         description: "Could not start workout",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleModeChange = async (newMode: string) => {
+    try {
+      const response = await fetch("http://localhost:5000/api/set_mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: newMode })
+      });
+      const data = await response.json();
+      // Immediately clear any workout-only UI when switching to normal mode
+      if (newMode === 'normal') {
+        setSensorData((prev) => ({ ...prev, formScore: 0, feedback: '' } as SensorData));
+      }
+      setMode(newMode);
+      toast({ title: 'Mode set', description: `Mode: ${newMode}` });
+    } catch (err) {
+      toast({ title: 'Error', description: 'Could not set mode', variant: 'destructive' });
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      const body = { height_cm: Number(heightCm), weight_kg: Number(weightKg), age: Number(age) };
+      const response = await fetch("http://localhost:5000/api/set_profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await response.json();
+      toast({ title: 'Profile saved', description: `Height ${data.profile.height_cm}cm • Weight ${data.profile.weight_kg}kg` });
+    } catch (err) {
+      toast({ title: 'Error', description: 'Could not save profile', variant: 'destructive' });
+    }
+  };
+
+  const handleResetSteps = async () => {
+    try {
+      const response = await fetch("http://localhost:5000/api/reset_steps", {
+        method: "POST",
+      });
+      const data = await response.json();
+      // optimistic UI update
+      setSensorData((prev) => ({ ...prev, stepCount: 0 } as SensorData));
+      toast({ title: 'Steps reset', description: 'Step counter has been reset' });
+    } catch (err) {
+      toast({ title: 'Error', description: 'Could not reset steps', variant: 'destructive' });
     }
   };
 
@@ -365,13 +425,13 @@ const Dashboard = () => {
                     Connect
                   </Button>
                   <Button 
-                    onClick={() => handleStartDemo("squat")} 
-                    variant="outline" 
-                    className="border-primary/50 hover:bg-primary/10 h-11 px-6"
-                  >
-                    <Play className="w-4 h-4 mr-2" />
-                    Demo Mode
-                  </Button>
+                      onClick={() => handleStartDemo("bicep_curl")} 
+                      variant="outline" 
+                      className="border-primary/50 hover:bg-primary/10 h-11 px-6"
+                    >
+                      <Play className="w-4 h-4 mr-2" />
+                      Demo Mode
+                    </Button>
                 </div>
               </div>
             </CardContent>
@@ -381,67 +441,85 @@ const Dashboard = () => {
         {connected && (
           <>
             {/* Controls */}
-            <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated mb-8">
-              <CardHeader className="border-b border-border/50">
-                <CardTitle className="text-lg">Workout Controls</CardTitle>
-                <CardDescription>Configure and control your workout session</CardDescription>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                  <div className="lg:col-span-1">
-                    <Label htmlFor="exercise" className="text-sm font-medium">Exercise Type</Label>
-                    <Select value={selectedExercise} onValueChange={setSelectedExercise}>
-                      <SelectTrigger id="exercise" className="bg-secondary/50 mt-2 h-11">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="squat">🏋️ Squats</SelectItem>
-                        <SelectItem value="pushup">💪 Push-ups</SelectItem>
-                        <SelectItem value="bicep_curl">💪 Bicep Curls</SelectItem>
-                      </SelectContent>
-                    </Select>
+            {mode === 'workout' ? (
+              <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated mb-8">
+                  <CardHeader className="border-b border-border/50">
+                    <CardTitle className="text-lg">Workout Controls</CardTitle>
+                    <CardDescription>Configure and control your workout session</CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-6">
+                    <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                      <div className="lg:col-span-1">
+                        <Label htmlFor="exercise" className="text-sm font-medium">Exercise Type</Label>
+                        <Select value={selectedExercise} onValueChange={setSelectedExercise}>
+                          <SelectTrigger id="exercise" className="bg-secondary/50 mt-2 h-11">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="bicep_curl">💪 Bicep Curls</SelectItem>
+                            <SelectItem value="lateral_raise">🦾 Lateral Raises</SelectItem>
+                            <SelectItem value="shoulder_press">🏋️ Shoulder Press</SelectItem>
+                            <SelectItem value="running">🏃 Running</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button onClick={handleStartWorkout} className="bg-gradient-to-r from-green-500 to-emerald-500 hover:shadow-glow hover:shadow-green-500/20 mt-auto h-11">
+                        <Play className="w-4 h-4 mr-2" />
+                        Start Workout
+                      </Button>
+                      <Button onClick={handleResetReps} variant="outline" className="border-accent/50 hover:bg-accent/10 mt-auto h-11">
+                        <RotateCcw className="w-4 h-4 mr-2" />
+                        Reset Reps
+                      </Button>
+                      <Button 
+                        onClick={handleToggleLogging} 
+                        variant={isLogging ? "destructive" : "outline"}
+                        className={!isLogging ? "border-primary/50 hover:bg-primary/10" : ""}
+                      >
+                        {isLogging ? <Pause className="w-4 h-4 mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+                        {isLogging ? "Stop Logging" : "Start Logging"}
+                      </Button>
+                    </div>
+                    <div className="flex gap-3 flex-wrap">
+                      <Button 
+                        onClick={handleViewLogs}
+                        variant="outline"
+                        className={`border-blue-500/50 text-blue-500 hover:bg-blue-500/10 ${availableLogs.length > 0 ? 'animate-pulse' : ''}`}
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        {showLogs ? 'Hide' : 'View'} CSV Logs {availableLogs.length > 0 && `(${availableLogs.length})`}
+                      </Button>
+                      <Button 
+                        onClick={() => {
+                          handleDisconnect();
+                          handleStopDemo();
+                        }} 
+                        variant="outline" 
+                        className="border-red-500/50 text-red-500 hover:bg-red-500/10"
+                      >
+                        <WifiOff className="w-4 h-4 mr-2" />
+                        Disconnect
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+            ) : (
+              <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated mb-8">
+                <CardHeader className="border-b border-border/50">
+                  <CardTitle className="text-lg">Normal Mode</CardTitle>
+                  <CardDescription>Background monitoring: steps, activity and heart rate</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col gap-3">
+                    <p className="text-sm text-muted-foreground">In Normal mode the system focuses on continuous monitoring (steps, activity, HR). Switch to Workout to track reps and form for wrist exercises.</p>
+                    <div className="flex gap-2">
+                      <Button onClick={() => handleModeChange('workout')} className="h-10">Switch to Workout</Button>
+                      <Button variant="outline" className="h-10" onClick={() => handleStartDemo('bicep_curl')}>Run Demo (Bicep)</Button>
+                    </div>
                   </div>
-                  <Button onClick={handleStartWorkout} className="bg-gradient-to-r from-green-500 to-emerald-500 hover:shadow-glow hover:shadow-green-500/20 mt-auto h-11">
-                    <Play className="w-4 h-4 mr-2" />
-                    Start Workout
-                  </Button>
-                  <Button onClick={handleResetReps} variant="outline" className="border-accent/50 hover:bg-accent/10 mt-auto h-11">
-                    <RotateCcw className="w-4 h-4 mr-2" />
-                    Reset Reps
-                  </Button>
-                  <Button 
-                    onClick={handleToggleLogging} 
-                    variant={isLogging ? "destructive" : "outline"}
-                    className={!isLogging ? "border-primary/50 hover:bg-primary/10" : ""}
-                    
-                  >
-                    {isLogging ? <Pause className="w-4 h-4 mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-                    {isLogging ? "Stop Logging" : "Start Logging"}
-                  </Button>
-                </div>
-                <div className="flex gap-3 flex-wrap">
-                  <Button 
-                    onClick={handleViewLogs}
-                    variant="outline"
-                    className={`border-blue-500/50 text-blue-500 hover:bg-blue-500/10 ${availableLogs.length > 0 ? 'animate-pulse' : ''}`}
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    {showLogs ? 'Hide' : 'View'} CSV Logs {availableLogs.length > 0 && `(${availableLogs.length})`}
-                  </Button>
-                  <Button 
-                    onClick={() => {
-                      handleDisconnect();
-                      handleStopDemo();
-                    }} 
-                    variant="outline" 
-                    className="border-red-500/50 text-red-500 hover:bg-red-500/10"
-                  >
-                    <WifiOff className="w-4 h-4 mr-2" />
-                    Disconnect
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
 
             {/* CSV Logs Viewer */}
             {showLogs && (
@@ -489,30 +567,103 @@ const Dashboard = () => {
             )}
 
             {/* Key Metrics Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              <RepCounter 
-                repCount={sensorData.repCount} 
-                exercise={sensorData.exercise}
-              />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  {mode === 'workout' ? (
+                    <RepCounter 
+                      repCount={sensorData.repCount} 
+                      exercise={selectedExercise}
+                    />
+                  ) : (
+                    <div />
+                  )}
 
-              <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 backdrop-blur-xl border-blue-500/30 hover:shadow-glow hover:shadow-blue-500/20 transition-all duration-300">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Gauge className="w-5 h-5 text-blue-500" />
-                    Form Score
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-5xl font-bold text-blue-500 mb-2">
-                    {sensorData.formScore || 0}
-                    <span className="text-2xl text-muted-foreground">/100</span>
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {sensorData.feedback || "Ready to start"}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+                  {mode === 'workout' ? (
+                    <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 backdrop-blur-xl border-blue-500/30 hover:shadow-glow hover:shadow-blue-500/20 transition-all duration-300">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-lg">
+                          <Gauge className="w-5 h-5 text-blue-500" />
+                          Form Score
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-5xl font-bold text-blue-500 mb-2">
+                          {sensorData.formScore || 0}
+                          <span className="text-2xl text-muted-foreground">/100</span>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {sensorData.feedback || "Ready to start"}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div />
+                  )}
+
+                  <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated">
+                    <CardHeader className="border-b border-border/50">
+                      <CardTitle className="text-lg">Mode & Profile</CardTitle>
+                      <CardDescription>Normal vs Workout • User profile for calories/speed</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div>
+                          <Label className="text-sm">Mode</Label>
+                          <Select value={mode} onValueChange={handleModeChange}>
+                            <SelectTrigger className="mt-2 h-10">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="normal">Normal</SelectItem>
+                              <SelectItem value="workout">Workout</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <Label className="text-xs">Height (cm)</Label>
+                            <Input value={heightCm} onChange={(e) => setHeightCm(e.target.value === '' ? '' : Number(e.target.value))} className="mt-1" />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Weight (kg)</Label>
+                            <Input value={weightKg} onChange={(e) => setWeightKg(e.target.value === '' ? '' : Number(e.target.value))} className="mt-1" />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Age</Label>
+                            <Input value={age} onChange={(e) => setAge(e.target.value === '' ? '' : Number(e.target.value))} className="mt-1" />
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button onClick={handleSaveProfile} className="h-10">Save Profile</Button>
+                          <Button onClick={() => handleModeChange(mode === 'normal' ? 'workout' : 'normal')} variant="outline" className="h-10">Toggle Mode</Button>
+                          <Button onClick={handleResetSteps} variant="destructive" className="h-10">Reset Steps</Button>
+                        </div>
+
+                        <div className="pt-2 border-t border-border/30">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="p-3 rounded-lg bg-secondary/20">
+                              <div className="text-xs text-muted-foreground">Steps</div>
+                              <div className="text-2xl font-bold">{sensorData.stepCount ?? 0}</div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-secondary/20">
+                              <div className="text-xs text-muted-foreground">Activity</div>
+                              <div className="text-2xl font-bold">{sensorData.activity ?? 'unknown'}</div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-secondary/20">
+                              <div className="text-xs text-muted-foreground">Speed (km/h)</div>
+                              <div className="text-2xl font-bold">{sensorData.runningSpeedKmh?.toFixed(2) ?? '0.00'}</div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-secondary/20">
+                              <div className="text-xs text-muted-foreground">Calories</div>
+                              <div className="text-2xl font-bold">{sensorData.caloriesTotal?.toFixed(2) ?? '0.00'}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
 
             {/* Heart Rate Waveform */}
             <div className="mb-8">
@@ -526,7 +677,7 @@ const Dashboard = () => {
             {/* Main Content Grid */}
             <div className="grid lg:grid-cols-3 gap-6 mb-8">
               {/* Sensor Visualization - Takes up 2 columns */}
-              <div className="lg:col-span-2">
+              <div className={mode === 'workout' ? "lg:col-span-2" : "lg:col-span-3"}>
                 <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated h-full transition-all duration-300 hover:shadow-xl">
                   <CardHeader className="border-b border-border/50">
                     <CardTitle className="flex items-center gap-2">
@@ -541,13 +692,15 @@ const Dashboard = () => {
                 </Card>
               </div>
 
-              {/* Form Feedback - Takes up 1 column */}
-              <div className="transition-all duration-300">
-                <FormFeedback 
-                  formScore={sensorData.formScore || 0}
-                  feedback={sensorData.feedback || "Ready to start"}
-                />
-              </div>
+              {/* Form Feedback - Takes up 1 column (only visible in workout mode) */}
+              {mode === 'workout' && (
+                <div className="transition-all duration-300">
+                  <FormFeedback 
+                    formScore={sensorData.formScore || 0}
+                    feedback={sensorData.feedback || "Ready to start"}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Orientation Metrics */}

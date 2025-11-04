@@ -33,12 +33,13 @@ int16_t gx, gy, gz;
 float pitch = 0, roll = 0, yaw = 0;
 
 // Heart rate variables
+int hr = 70; // Current heart rate (BPM) - the main variable
 int heartRateValue = 0;
 int bpm = 0;
 unsigned long lastBeatTime = 0;
 int beatThreshold = 550;
 int signal = 0;
-float smoothedBPM = 0;
+float smoothedBPM = 70; // Initialize to 70
 bool beatDetected = false;
 
 // Display variables
@@ -220,6 +221,7 @@ void readHeartRate() {
   
   static int peak = 512;
   static int trough = 512;
+  static unsigned long lastValidBeat = 0;
   
   peak = max(peak * 0.95, (float)signal);
   trough = min(trough * 1.05, (float)signal);
@@ -238,6 +240,7 @@ void readHeartRate() {
         } else {
           smoothedBPM = (smoothedBPM * 0.7) + (bpm * 0.3);
         }
+        lastValidBeat = currentTime;
       }
     }
     lastBeatTime = currentTime;
@@ -246,6 +249,20 @@ void readHeartRate() {
     beatDetected = false;
     digitalWrite(LED_PIN, LOW);
   }
+  
+  // If no valid beats detected for 5 seconds, gradually reduce BPM to resting rate
+  if (millis() - lastValidBeat > 5000 && smoothedBPM > 0) {
+    smoothedBPM = smoothedBPM * 0.99; // Slowly decrease
+    if (smoothedBPM < 60) smoothedBPM = 60; // Don't go below 60 BPM
+  }
+  
+  // Initialize smoothedBPM to a default resting rate if still 0
+  if (smoothedBPM == 0) {
+    smoothedBPM = 70; // Default resting heart rate
+  }
+  
+  // Update hr variable (main heart rate variable)
+  hr = (int)smoothedBPM;
 }
 
 void sendSensorData() {
@@ -260,7 +277,7 @@ void sendSensorData() {
   doc["pitch"] = round(pitch * 10) / 10.0;
   doc["roll"] = round(roll * 10) / 10.0;
   doc["yaw"] = round(yaw * 10) / 10.0;
-  doc["heartRate"] = (int)smoothedBPM;
+  doc["heartRate"] = hr; // Use hr variable
   doc["pulse"] = signal;
   doc["beatDetected"] = beatDetected;
   doc["repCount"] = repCount;
@@ -270,6 +287,14 @@ void sendSensorData() {
   String jsonString;
   serializeJson(doc, jsonString);
   webSocket.broadcastTXT(jsonString);
+  
+  // Debug output every 2 seconds
+  static unsigned long lastDebug = 0;
+  if (millis() - lastDebug > 2000) {
+    lastDebug = millis();
+    Serial.printf("💓 HR: %d BPM, Pulse: %d, Beat: %s, Clients: %d\n", 
+                  hr, signal, beatDetected ? "YES" : "NO", webSocket.connectedClients());
+  }
 }
 
 void updateDisplay() {
@@ -309,7 +334,7 @@ void displayHeartRatePage() {
   // Large BPM display
   display.setTextSize(3);
   display.setCursor(20, 20);
-  display.print((int)smoothedBPM);
+  display.print(hr); // Use hr variable
   
   display.setTextSize(1);
   display.setCursor(90, 35);

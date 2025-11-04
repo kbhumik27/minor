@@ -37,7 +37,15 @@ sensor_data = {
     'beatDetected': False,
     'repCount': 0,
     'exercise': 'Ready',
-    'timestamp': 0
+    'timestamp': 0,
+    # Activity/step metrics (populated by FormAnalyzer)
+    'stepCount': 0,
+    'stepDetected': False,
+    'activity': 'unknown',
+    'activityConfidence': 0.0,
+    'runningSpeedKmh': 0.0,
+    'caloriesTotal': 0.0,
+    'mode': 'normal'
 }
 
 sensor_buffer = deque(maxlen=20)  # For AI prediction
@@ -77,16 +85,26 @@ async def connect_to_esp32(esp32_url):
                     message = await asyncio.wait_for(websocket.recv(), timeout=5.0)
                     data = json.loads(message)
                     
-                    # Update global state with ESP32 data
-                    sensor_data.update(data)
+                    # Debug: Print raw ESP32 data
+                    print(f"\n📡 Raw ESP32 data keys: {list(data.keys())}")
                     
-                    # IMPORTANT: Preserve heart rate data from ESP32
+                    # Update global state with ESP32 data
+                    # Important: Only update fields that are present in ESP32 data
+                    for key in ['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'pitch', 'roll', 'yaw']:
+                        if key in data:
+                            sensor_data[key] = data[key]
+                    
+                    # IMPORTANT: Only update heart rate if ESP32 sends it
+                    # This prevents default values from overriding real sensor data
                     if 'heartRate' in data:
                         sensor_data['heartRate'] = data['heartRate']
+                        print(f"  ✓ HR from ESP32: {data['heartRate']}")
                     if 'pulse' in data:
                         sensor_data['pulse'] = data['pulse']
+                        print(f"  ✓ Pulse from ESP32: {data['pulse']}")
                     if 'beatDetected' in data:
                         sensor_data['beatDetected'] = data['beatDetected']
+                        print(f"  ✓ Beat from ESP32: {data['beatDetected']}")
                     
                     # Add to buffer for AI
                     sensor_buffer.append([
@@ -95,27 +113,43 @@ async def connect_to_esp32(esp32_url):
                         data.get('pitch', 0), data.get('roll', 0), data.get('yaw', 0)
                     ])
                     
-                    # Analyze form
-                    if sensor_data.get('exercise') != 'Ready':
+                    # Analyze form only when analyzer is in 'workout' mode and exercise selected
+                    analyzer_mode = getattr(form_analyzer, 'mode', 'normal')
+                    if sensor_data.get('exercise') != 'Ready' and analyzer_mode == 'workout':
                         score, feedback, rep_detected = form_analyzer.analyze(
-                            sensor_data.get('exercise', 'squat'),
+                            sensor_data.get('exercise', 'bicep_curl'),
                             data.get('pitch', 0),
                             data.get('roll', 0),
                             data  # Pass full ESP32 data to prevent synthetic HR generation
                         )
-                        
+
                         sensor_data['formScore'] = score
                         sensor_data['feedback'] = ' | '.join(feedback) if feedback else ''
-                        
+
                         # Get mesh data for visualization
                         sensor_data['meshData'] = form_analyzer.get_mesh_data()
-                        
+
                         # Increment rep count if detected
                         if rep_detected:
                             sensor_data['repCount'] = sensor_data.get('repCount', 0) + 1
+
+                    # Always merge analyzer-derived metrics (steps, activity, speed, calories)
+                    try:
+                        metrics = getattr(form_analyzer, 'latest_metrics', None)
+                        if metrics:
+                            # Map keys into sensor_data for frontends
+                            sensor_data['stepCount'] = metrics.get('stepCount', sensor_data.get('stepCount', 0))
+                            sensor_data['stepDetected'] = metrics.get('stepDetected', False)
+                            sensor_data['activity'] = metrics.get('activity', sensor_data.get('activity', 'unknown'))
+                            sensor_data['activityConfidence'] = metrics.get('activityConfidence', 0.0)
+                            sensor_data['runningSpeedKmh'] = metrics.get('runningSpeedKmh', 0.0)
+                            sensor_data['caloriesTotal'] = metrics.get('caloriesTotal', 0.0)
+                    except Exception:
+                        pass
                     
                     # Debug print to verify heart rate is being received
-                    print(f"ESP32 Data - HR: {sensor_data.get('heartRate', 'N/A')}, Pulse: {sensor_data.get('pulse', 'N/A')}, Beat: {sensor_data.get('beatDetected', 'N/A')}")
+                    print(f"📊 Current sensor_data - HR: {sensor_data.get('heartRate', 'N/A')}, Pulse: {sensor_data.get('pulse', 'N/A')}, Beat: {sensor_data.get('beatDetected', 'N/A')}")
+                    print(f"   Exercise: {sensor_data.get('exercise')}, Pitch: {sensor_data.get('pitch', 0):.1f}°\n")
                     
                     # Broadcast to all connected clients
                     socketio.emit('sensor_data', sensor_data)
@@ -227,6 +261,11 @@ def start_demo():
     
     # Start demo mode
     demo_mode = True
+    # When starting a demo workout, put analyzer into workout mode
+    try:
+        form_analyzer.set_mode('workout')
+    except Exception:
+        pass
     result = form_analyzer.start_demo(exercise)
     sensor_data['exercise'] = exercise
     
@@ -249,6 +288,18 @@ def start_demo():
                 sensor_data['feedback'] = ' | '.join(feedback) if feedback else ''
                 sensor_data['meshData'] = form_analyzer.get_mesh_data()
                 sensor_data['demoMode'] = True
+                # Merge analyzer-derived metrics into demo sensor_data
+                try:
+                    metrics = getattr(form_analyzer, 'latest_metrics', None)
+                    if metrics:
+                        sensor_data['stepCount'] = metrics.get('stepCount', sensor_data.get('stepCount', 0))
+                        sensor_data['stepDetected'] = metrics.get('stepDetected', False)
+                        sensor_data['activity'] = metrics.get('activity', sensor_data.get('activity', 'unknown'))
+                        sensor_data['activityConfidence'] = metrics.get('activityConfidence', 0.0)
+                        sensor_data['runningSpeedKmh'] = metrics.get('runningSpeedKmh', 0.0)
+                        sensor_data['caloriesTotal'] = metrics.get('caloriesTotal', 0.0)
+                except Exception:
+                    pass
                 
                 # Broadcast to clients
                 socketio.emit('sensor_data', sensor_data)
@@ -429,6 +480,30 @@ def reset_reps():
     return jsonify({'status': 'reps_reset'})
 
 
+@app.route('/api/reset_steps', methods=['POST'])
+def reset_steps():
+    """Reset step counter"""
+    global sensor_data
+    sensor_data['stepCount'] = 0
+    # reset analyzer internal counter if present
+    try:
+        form_analyzer.step_count = 0
+        if hasattr(form_analyzer, 'latest_metrics'):
+            form_analyzer.latest_metrics['stepCount'] = 0
+            form_analyzer.latest_metrics['stepDetected'] = False
+    except Exception:
+        pass
+
+    # Forward command to ESP32 if connected (optional)
+    if esp32_websocket:
+        try:
+            asyncio.run(esp32_websocket.send(json.dumps({'command': 'reset_steps'})))
+        except Exception:
+            pass
+
+    return jsonify({'status': 'steps_reset'})
+
+
 @app.route('/api/set_exercise', methods=['POST'])
 def set_exercise():
     """Set current exercise"""
@@ -446,6 +521,32 @@ def set_exercise():
         })))
     
     return jsonify({'status': 'exercise_set', 'exercise': exercise})
+
+
+@app.route('/api/set_mode', methods=['POST'])
+def set_mode():
+    """Set analyzer mode (normal or workout)"""
+    data = request.json
+    mode = data.get('mode', 'normal')
+    form_analyzer.set_mode(mode)
+    sensor_data['mode'] = mode
+    return jsonify({'status': 'mode_set', 'mode': mode})
+
+
+@app.route('/api/set_profile', methods=['POST'])
+def set_profile():
+    """Set user profile values used for calorie/speed estimation"""
+    data = request.json
+    height = data.get('height_cm')
+    weight = data.get('weight_kg')
+    age = data.get('age')
+    form_analyzer.set_user_profile(height_cm=height, weight_kg=weight, age=age)
+    sensor_data['userProfile'] = {
+        'height_cm': form_analyzer.user_height_cm,
+        'weight_kg': form_analyzer.user_weight_kg,
+        'age': form_analyzer.user_age
+    }
+    return jsonify({'status': 'profile_set', 'profile': sensor_data['userProfile']})
 
 
 # SocketIO Events
@@ -528,6 +629,9 @@ if __name__ == '__main__':
     print("  GET  /api/logs/<filename> - Download a specific log file")
     print("  POST /api/reset_reps - Reset rep counter")
     print("  POST /api/set_exercise - Set exercise type")
+    print("  POST /api/set_mode - Set analyzer mode (normal|workout)")
+    print("  POST /api/set_profile - Set user profile (height_cm, weight_kg, age)")
+    print("  POST /api/reset_steps - Reset step counter")
     print("\nWebSocket: Real-time sensor data streaming")
     print("Data logs will be saved to: backend/logs/")
     print("=" * 60)
