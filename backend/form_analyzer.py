@@ -839,8 +839,8 @@ class FormAnalyzer:
             self._simple_last_step_time = 0
         
         # Detect step if deviation is significant AND enough time has passed since last step
-        step_threshold = 0.2  # 0.2g deviation threshold (sensitive but not too sensitive)
-        min_step_time = 0.3  # Minimum 300ms between steps
+        step_threshold = 0.4  # Increased from 0.2g to 0.4g - less sensitive
+        min_step_time = 0.6  # Increased from 300ms to 600ms - slower counting
         
         time_since_last = now - self._simple_last_step_time
         
