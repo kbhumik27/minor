@@ -804,7 +804,7 @@ class FormAnalyzer:
         else:
             ts = datetime.now().timestamp()
 
-        # Get raw sensor readings from MPU6050 (as sent by ESP32)
+        # Get sensor readings (ESP32 sends in g units and deg/s, NOT raw ADC values)
         ax = float(sensor_data.get('ax', 0.0) or 0.0)
         ay = float(sensor_data.get('ay', 0.0) or 0.0)
         az = float(sensor_data.get('az', 0.0) or 0.0)
@@ -812,7 +812,10 @@ class FormAnalyzer:
         gy = float(sensor_data.get('gy', 0.0) or 0.0)
         gz = float(sensor_data.get('gz', 0.0) or 0.0)
 
-        # Calculate acceleration magnitude (remove gravity bias)
+        # Debug print to verify we're getting data
+        print(f"🔍 FormAnalyzer received: ax={ax:.3f}, ay={ay:.3f}, az={az:.3f}, gx={gx:.1f}, gy={gy:.1f}, gz={gz:.1f}")
+
+        # Calculate acceleration magnitude (in g units, not raw)
         acc_magnitude = math.sqrt(ax*ax + ay*ay + az*az)
         
         # Append to buffer
@@ -833,8 +836,10 @@ class FormAnalyzer:
             mean_mag = float(np.mean(window_mags))
             std_mag = float(np.std(window_mags))
             
-            # Adaptive threshold: mean + 1.5*std (more robust than fixed threshold)
-            threshold = mean_mag + max(0.3, 1.5 * std_mag)
+            # Adaptive threshold for real sensor data (in g units, not raw ADC)
+            # Typical walking creates acceleration variations of 0.1-0.3g
+            # Running creates variations of 0.3-0.8g
+            threshold = mean_mag + max(0.15, 1.2 * std_mag)
             
             # For demo mode, use a much lower fixed threshold to ensure steps are detected
             if self.demo_mode.running:
@@ -846,6 +851,7 @@ class FormAnalyzer:
                     if current_mag > prev_mag + 0.2:  # Significant increase
                         step_detected = True
                         self.step_count += 1
+                        print(f"👟 Demo step detected! Total: {self.step_count}")
             else:
                 # Peak detection: current value is a local maximum above threshold
                 if len(recent_mags) >= 5:
@@ -861,12 +867,15 @@ class FormAnalyzer:
                         if self._last_step_time is None:
                             step_detected = True
                             self._last_step_time = now
+                            self.step_count += 1
+                            print(f"👟 ESP32 step detected! Total: {self.step_count}, Mag: {recent_mags[mid_idx]:.3f}g, Threshold: {threshold:.3f}g")
                         else:
                             time_since_last = now - self._last_step_time
                             if self._min_step_interval <= time_since_last <= self._max_step_interval:
                                 step_detected = True
                                 self._last_step_time = now
                                 self.step_count += 1
+                                print(f"👟 ESP32 step detected! Total: {self.step_count}, Mag: {recent_mags[mid_idx]:.3f}g, Threshold: {threshold:.3f}g, Interval: {time_since_last:.2f}s")
 
         # Calculate cadence (steps per minute) using last 10 seconds
         window_start = now - 10.0
@@ -877,14 +886,26 @@ class FormAnalyzer:
         # ACTIVITY CLASSIFICATION using trained model
         activity = 'stationary'
         confidence = 0.5
+        gyro_magnitude = math.sqrt(gx*gx + gy*gy + gz*gz)
         
         if self.activity_model is not None and self.mode == 'normal':
             try:
                 # Prepare features for the model (match training feature set)
-                # Typical features: ax, ay, az, gx, gy, gz, acc_mag, gyro_mag
-                gyro_magnitude = math.sqrt(gx*gx + gy*gy + gz*gz)
+                # Model was trained on raw sensor values, but ESP32 sends in g and deg/s
+                # Need to convert back to approximate raw values for model compatibility
+                # MPU6050: ±2g range = 16384 LSB/g, ±250°/s range = 131 LSB/°/s
+                ax_raw = ax * 16384.0
+                ay_raw = ay * 16384.0
+                az_raw = az * 16384.0
+                gx_raw = gx * 131.0
+                gy_raw = gy * 131.0
+                gz_raw = gz * 131.0
                 
-                features = np.array([[ax, ay, az, gx, gy, gz, acc_magnitude, gyro_magnitude]])
+                # Calculate magnitudes in raw units
+                acc_mag_raw = math.sqrt(ax_raw*ax_raw + ay_raw*ay_raw + az_raw*az_raw)
+                gyro_mag_raw = math.sqrt(gx_raw*gx_raw + gy_raw*gy_raw + gz_raw*gz_raw)
+                
+                features = np.array([[ax_raw, ay_raw, az_raw, gx_raw, gy_raw, gz_raw, acc_mag_raw, gyro_mag_raw]])
                 
                 # Predict activity
                 prediction = self.activity_model.predict(features)[0]
@@ -908,18 +929,22 @@ class FormAnalyzer:
                 }
                 activity = activity_map.get(activity, 'unknown')
                 
+                print(f"🎯 Activity classified: {activity} (confidence: {confidence:.2f}, prediction: {prediction})")
+                
             except Exception as e:
                 print(f"⚠ Activity prediction error: {e}")
+                import traceback
+                traceback.print_exc()
                 # Fallback to simple heuristic
                 activity, confidence = self._simple_activity_classification(
                     cadence_spm, acc_magnitude, gyro_magnitude
                 )
         else:
             # Fallback to simple heuristic when model not available or in workout mode
-            gyro_magnitude = math.sqrt(gx*gx + gy*gy + gz*gz)
             activity, confidence = self._simple_activity_classification(
                 cadence_spm, acc_magnitude, gyro_magnitude
             )
+            print(f"🎯 Activity (heuristic): {activity} (confidence: {confidence:.2f})")
 
         # Running speed estimation using MPU6050 step detection
         height_m = max(0.5, self.user_height_cm / 100.0)

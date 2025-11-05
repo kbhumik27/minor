@@ -1,496 +1,288 @@
+/*
+  Final: ESP32 Fitness Tracker + SpO2
+  - MPU6050 (GY-521)
+  - MAX30100 (SpO2 + Pulse)
+  - Circular analog pulse sensor (for backup)
+  - WiFi + WebSocket broadcast
+*/
+
 #include <WiFi.h>
 #include <WebSocketsServer.h>
 #include <Wire.h>
-#include <MPU6050.h>
-#include <ArduinoJson.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <MAX30100_PulseOximeter.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <ArduinoJson.h>
+#include "MAX30100_PulseOximeter.h"
 
-// WiFi credentials
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+// ======== CONFIG ========
+const char* ssid = "Utkarsh's Galaxy A54 5G";
+const char* password = "123456ab";
 
-// WebSocket server on port 81
-WebSocketsServer webSocket = WebSocketsServer(81);
-
-// MPU6050 sensor
-MPU6050 mpu;
-
-// PulseOximeter sensor
-PulseOximeter pox;
-
-// OLED Display settings (128x64)
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-#define OLED_ADDRESS 0x3C
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#define OLED_ADDR 0x3C
+#define I2C_SDA 21
+#define I2C_SCL 22
+#define PULSE_PIN 34
+#define LED_PIN 2
 
-// Pin definitions
-#define HEART_RATE_PIN 34
+// ======== OBJECTS ========
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+Adafruit_MPU6050 mpu;
+WebSocketsServer webSocket(81);
+PulseOximeter pox;
 
-// Sensor data variables
-int16_t ax, ay, az;
-int16_t gx, gy, gz;
-float pitch = 0, roll = 0, yaw = 0;
+// ======== GLOBALS ========
+float pitch_smooth = 0, roll_smooth = 0, pitch_offset = 0, roll_offset = 0, yaw = 0;
+float ax_raw = 0, ay_raw = 0, az_raw = 0;
+float gx_dps = 0, gy_dps = 0, gz_dps = 0;
+const float alpha = 0.90f;
 
-// Heart rate and SpO2 variables
-int heartRateValue = 0;
-int bpm = 0;
-int hr = 70; // Main heart rate variable
-float smoothedBPM = 70; // Initialize to 70
-int spo2 = 0;
-float smoothedSpO2 = 98; // Initialize to 98
-unsigned long lastBeatTime = 0;
-int beatThreshold = 550;
-bool beatDetected = false;
+int sensorSignal = 0;
+int threshold = 520;
+bool pulseDetected = false;
+unsigned long lastPeakTime = 0;
+float bpm = 0, avgBPM = 0;
+const int avgWindow = 8;
+float bpmBuffer[avgWindow] = {0};
+int bpmIndex = 0;
 
-// Display variables
-int displayPage = 0;
-unsigned long lastDisplayUpdate = 0;
-const int displayUpdateInterval = 100; // 10Hz display update
+float spo2 = 0;   // SpO2 from MAX30100
+float hr_spo2 = 0; // HR from MAX30100
 
-// Timing
-unsigned long lastUpdate = 0;
-unsigned long lastHeartRateCalc = 0;
-const int updateInterval = 50;
-const int heartRateInterval = 20;
+unsigned long lastSend = 0, lastDisplayUpdate = 0;
+const unsigned long sendInterval = 200;
+const unsigned long displayInterval = 200;
 
-// Calibration offsets
-int16_t axOffset = 0, ayOffset = 0, azOffset = 0;
-int16_t gxOffset = 0, gyOffset = 0, gzOffset = 0;
+// ======== PROTOTYPES ========
+void displayIntro(const char*, const char*);
+void calibrateMPU();
+void readSensorsAndCompute();
+void readPulse();
+void updateDisplay();
+void sendSensorData();
+void webSocketEvent(uint8_t, WStype_t, uint8_t*, size_t);
+void onBeatDetected();
 
-// Exercise tracking
-int repCount = 0;
-String currentExercise = "Ready";
-String feedback = "Start moving";
-
+// ======== SETUP ========
 void setup() {
   Serial.begin(115200);
-  
-  pinMode(HEART_RATE_PIN, INPUT);
-  
-  // Initialize I2C
-  Wire.begin(21, 22);
-  
-  // Initialize OLED Display
-  if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    // Continue without display
-  } else {
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
-    display.println("AI Fitness");
-    display.println("Tracker");
-    display.println();
-    display.println("Initializing...");
-    display.display();
+  Wire.begin(I2C_SDA, I2C_SCL);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  // OLED init
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    for (;;);
   }
-  
-  delay(1000);
-  
-  // Initialize MPU6050
-  Serial.println("Initializing MPU6050...");
-  mpu.initialize();
-  
-  if (mpu.testConnection()) {
-    Serial.println("MPU6050 OK");
-    displayMessage("MPU6050", "Connected", 1000);
-  } else {
-    Serial.println("MPU6050 FAIL");
-    displayMessage("MPU6050", "Failed!", 2000);
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  displayIntro("AI Fitness Tracker", "Initializing...");
+
+  // MPU6050 init
+  if (!mpu.begin()) {
+    displayIntro("MPU6050", "Connection Failed!");
+    for (;;);
   }
-  
-  mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
-  mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_250);
-  
-  // Initialize MAX30100 PulseOximeter
-  Serial.println("Initializing MAX30100...");
+  mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
+  mpu.setGyroRange(MPU6050_RANGE_250_DEG);
+  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  delay(200);
+
+  displayIntro("Calibrating MPU", "Keep still...");
+  calibrateMPU();
+
+  // ===== MAX30100 INIT =====
+  displayIntro("MAX30100", "Starting...");
   if (!pox.begin()) {
-    Serial.println("MAX30100 FAIL");
-    displayMessage("MAX30100", "Failed!", 2000);
+    Serial.println("MAX30100 not found - check wiring");
+    displayIntro("MAX30100", "Not found!");
   } else {
-    Serial.println("MAX30100 OK");
-    displayMessage("MAX30100", "Connected", 1000);
     pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
     pox.setOnBeatDetectedCallback(onBeatDetected);
+    Serial.println("MAX30100 initialized.");
   }
-  
-  // Calibrate
-  displayMessage("Calibrating", "Keep still...", 0);
-  calibrateMPU6050();
-  displayMessage("Calibration", "Complete!", 1000);
-  
-  // Connect to WiFi
-  displayMessage("WiFi", "Connecting...", 0);
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(ssid);
+
+  // WiFi
+  displayIntro("WiFi", "Connecting...");
   WiFi.begin(ssid, password);
-  
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-    delay(500);
+    delay(250);
     Serial.print(".");
     attempts++;
   }
-  
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected!");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
-    
-    displayMessage("WiFi OK", WiFi.localIP().toString().c_str(), 2000);
+    displayIntro("WiFi Connected", WiFi.localIP().toString().c_str());
   } else {
-    Serial.println("\nWiFi failed");
-    displayMessage("WiFi", "Failed!", 2000);
+    displayIntro("WiFi", "Failed!");
   }
-  
-  // Start WebSocket
+
+  // WebSocket
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
-  
-  displayMessage("System", "Ready!", 1000);
-  Serial.println("System Ready");
+
+  displayIntro("System Ready", "Streaming...");
+  delay(800);
 }
 
+// ======== LOOP ========
 void loop() {
   webSocket.loop();
-  
-  unsigned long currentTime = millis();
-  
-  // Update PulseOximeter
   pox.update();
-  
-  // Read heart rate
-  if (currentTime - lastHeartRateCalc >= heartRateInterval) {
-    lastHeartRateCalc = currentTime;
-    readHeartRate();
-  }
-  
-  // Update sensors and send data
-  if (currentTime - lastUpdate >= updateInterval) {
-    lastUpdate = currentTime;
-    readMPU6050Data();
-    calculateOrientation();
+
+  hr_spo2 = pox.getHeartRate();
+  spo2 = pox.getSpO2();
+
+  readSensorsAndCompute();
+  readPulse();
+
+  if (millis() - lastSend >= sendInterval) {
+    lastSend = millis();
     sendSensorData();
   }
-  
-  // Update display
-  if (currentTime - lastDisplayUpdate >= displayUpdateInterval) {
-    lastDisplayUpdate = currentTime;
+
+  if (millis() - lastDisplayUpdate >= displayInterval) {
+    lastDisplayUpdate = millis();
     updateDisplay();
   }
 }
 
+// ======== FUNCTIONS ========
+
 void onBeatDetected() {
-  beatDetected = true;
-  // Reset beat detected after a short time
-  static unsigned long lastBeatReset = 0;
-  if (millis() - lastBeatReset > 100) {
-    lastBeatReset = millis();
-    // Use a timer to reset beatDetected
-  }
+  digitalWrite(LED_PIN, HIGH);
+  delay(20);
+  digitalWrite(LED_PIN, LOW);
 }
 
-void calibrateMPU6050() {
-  long axSum = 0, aySum = 0, azSum = 0;
-  long gxSum = 0, gySum = 0, gzSum = 0;
-  int samples = 200;
-  
-  for (int i = 0; i < samples; i++) {
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    axSum += ax;
-    aySum += ay;
-    azSum += az - 16384;
-    gxSum += gx;
-    gySum += gy;
-    gzSum += gz;
+void displayIntro(const char* line1, const char* line2) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 10);
+  display.println(line1);
+  display.setCursor(0, 30);
+  display.println(line2);
+  display.display();
+  delay(800);
+}
+
+void calibrateMPU() {
+  const int N = 300;
+  double ax = 0, ay = 0, az = 0;
+  sensors_event_t a, g, temp;
+  delay(300);
+  for (int i = 0; i < N; ++i) {
+    mpu.getEvent(&a, &g, &temp);
+    ax += a.acceleration.x;
+    ay += a.acceleration.y;
+    az += a.acceleration.z;
     delay(5);
   }
-  
-  axOffset = axSum / samples;
-  ayOffset = aySum / samples;
-  azOffset = azSum / samples;
-  gxOffset = gxSum / samples;
-  gyOffset = gySum / samples;
-  gzOffset = gzSum / samples;
+  ax /= N; ay /= N; az /= N;
+  pitch_offset = atan2(-ax, sqrt(ay * ay + az * az)) * 180.0 / PI;
+  roll_offset = atan2(ay, az) * 180.0 / PI;
+  pitch_smooth = roll_smooth = 0.0;
 }
 
-void readMPU6050Data() {
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-  ax -= axOffset;
-  ay -= ayOffset;
-  az -= azOffset;
-  gx -= gxOffset;
-  gy -= gyOffset;
-  gz -= gzOffset;
+void readSensorsAndCompute() {
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+  ax_raw = a.acceleration.x / 9.80665f;
+  ay_raw = a.acceleration.y / 9.80665f;
+  az_raw = a.acceleration.z / 9.80665f;
+
+  float pitch_raw = atan2(-a.acceleration.x, sqrt(a.acceleration.y * a.acceleration.y + a.acceleration.z * a.acceleration.z)) * 180.0f / PI;
+  float roll_raw = atan2(a.acceleration.y, a.acceleration.z) * 180.0f / PI;
+  float pitch_corr = pitch_raw - pitch_offset;
+  float roll_corr = roll_raw - roll_offset;
+  pitch_smooth = alpha * pitch_smooth + (1 - alpha) * pitch_corr;
+  roll_smooth = alpha * roll_smooth + (1 - alpha) * roll_corr;
+  gx_dps = g.gyro.x * 180.0f / PI;
+  gy_dps = g.gyro.y * 180.0f / PI;
+  gz_dps = g.gyro.z * 180.0f / PI;
+  yaw += gz_dps * ((float)sendInterval / 1000.0f);
+  if (yaw > 180.0f) yaw -= 360.0f;
+  if (yaw < -180.0f) yaw += 360.0f;
 }
 
-void calculateOrientation() {
-  float axG = ax / 16384.0;
-  float ayG = ay / 16384.0;
-  float azG = az / 16384.0;
-  
-  pitch = atan2(ayG, sqrt(axG * axG + azG * azG)) * 180.0 / PI;
-  roll = atan2(-axG, azG) * 180.0 / PI;
-  
-  float gyroZ = gz / 131.0;
-  yaw += gyroZ * (updateInterval / 1000.0);
-  
-  if (yaw > 180) yaw -= 360;
-  if (yaw < -180) yaw += 360;
-}
-
-void readHeartRate() {
-  // Get heart rate and SpO2 from MAX30100
-  heartRateValue = pox.getHeartRate();
-  spo2 = pox.getSpO2();
-  
-  // Smooth the values
-  if (heartRateValue > 0) {
-    smoothedBPM = (smoothedBPM * 0.7) + (heartRateValue * 0.3);
+void readPulse() {
+  sensorSignal = analogRead(PULSE_PIN);
+  unsigned long now = millis();
+  if (sensorSignal > threshold && !pulseDetected) {
+    pulseDetected = true;
+    unsigned long interval = now - lastPeakTime;
+    if (lastPeakTime != 0 && interval > 300 && interval < 2000) {
+      float instantBPM = 60000.0f / (float)interval;
+      bpmBuffer[bpmIndex] = instantBPM;
+      bpmIndex = (bpmIndex + 1) % avgWindow;
+      float sum = 0; int cnt = 0;
+      for (int i = 0; i < avgWindow; ++i) {
+        if (bpmBuffer[i] > 0.1f) { sum += bpmBuffer[i]; cnt++; }
+      }
+      if (cnt > 0) avgBPM = sum / cnt;
+      bpm = instantBPM;
+    }
+    lastPeakTime = now;
   }
-  
-  if (spo2 > 0) {
-    smoothedSpO2 = (smoothedSpO2 * 0.8) + (spo2 * 0.2);
-  }
-  
-  // Update hr variable (main heart rate variable)
-  hr = (int)smoothedBPM;
-}
-
-void sendSensorData() {
-  StaticJsonDocument<512> doc;
-  
-  doc["ax"] = ax;
-  doc["ay"] = ay;
-  doc["az"] = az;
-  doc["gx"] = gx;
-  doc["gy"] = gy;
-  doc["gz"] = gz;
-  doc["pitch"] = round(pitch * 10) / 10.0;
-  doc["roll"] = round(roll * 10) / 10.0;
-  doc["yaw"] = round(yaw * 10) / 10.0;
-  doc["heartRate"] = hr; // Heart rate (BPM)
-  doc["pulse"] = hr; // Use hr as pulse (BPM) - same value for compatibility
-  doc["beatDetected"] = beatDetected;
-  doc["spo2"] = (int)smoothedSpO2;
-  doc["repCount"] = repCount;
-  doc["exercise"] = currentExercise;
-  doc["timestamp"] = millis();
-  
-  String jsonString;
-  serializeJson(doc, jsonString);
-  webSocket.broadcastTXT(jsonString);
-  
-  // Debug output every 2 seconds
-  static unsigned long lastDebug = 0;
-  if (millis() - lastDebug > 2000) {
-    lastDebug = millis();
-    Serial.printf("💓 Heart Rate: %d BPM, Pulse: %d BPM, SpO2: %d%%, Beat: %s, Clients: %d\n", 
-                  hr, hr, (int)smoothedSpO2, beatDetected ? "YES" : "NO", webSocket.connectedClients());
-  }
+  if (sensorSignal < threshold - 30) pulseDetected = false;
 }
 
 void updateDisplay() {
   display.clearDisplay();
   display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  
-  // Rotate through different display pages
-  switch(displayPage % 3) {
-    case 0:
-      displayHeartRatePage();
-      break;
-    case 1:
-      displayOrientationPage();
-      break;
-    case 2:
-      displayExercisePage();
-      break;
-  }
-  
-  // Auto-rotate every 3 seconds
-  static unsigned long lastPageChange = 0;
-  if (millis() - lastPageChange > 3000) {
-    lastPageChange = millis();
-    displayPage++;
-  }
-  
+  display.setCursor(0, 0);
+  display.println("AI Fitness Tracker");
+  display.drawLine(0, 10, SCREEN_WIDTH - 1, 10, SSD1306_WHITE);
+
+  display.setCursor(0, 14);
+  display.print("Pitch: "); display.println(pitch_smooth, 1);
+  display.setCursor(0, 26);
+  display.print("Roll : "); display.println(roll_smooth, 1);
+  display.setCursor(0, 38);
+  display.print("BPM  : "); display.println((int)round(avgBPM));
+  display.setCursor(0, 50);
+  display.print("SpO2 : "); display.println(spo2, 1);
   display.display();
 }
 
-void displayHeartRatePage() {
-  // Heart icon
-  display.setCursor(0, 0);
-  display.println("HEART RATE & SPO2");
-  display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
-  
-  // Heart Rate display
-  display.setTextSize(1);
-  display.setCursor(0, 15);
-  display.print("HR:");
-  display.setTextSize(2);
-  display.setCursor(25, 12);
-  display.print(hr);
-  display.setTextSize(1);
-  display.setCursor(55, 17);
-  display.print("BPM");
-  
-  // Pulse display (same as HR for now)
-  display.setCursor(0, 30);
-  display.print("Pulse:");
-  display.setCursor(45, 30);
-  display.print(hr);
-  display.print(" BPM");
-  
-  // SpO2 display
-  display.setCursor(0, 45);
-  display.print("SpO2:");
-  display.setCursor(45, 45);
-  display.print((int)smoothedSpO2);
-  display.print("%");
-  
-  // Beat indicator
-  if (beatDetected) {
-    display.fillCircle(110, 55, 5, SSD1306_WHITE);
-  } else {
-    display.drawCircle(110, 55, 5, SSD1306_WHITE);
-  }
+void sendSensorData() {
+  StaticJsonDocument<512> doc;
+  doc["pitch"] = round(pitch_smooth * 10.0f) / 10.0f;
+  doc["roll"] = round(roll_smooth * 10.0f) / 10.0f;
+  doc["yaw"] = round(yaw * 10.0f) / 10.0f;
+
+  // ✅ Added corrected accel key names for dashboard
+  doc["accel_x"] = ax_raw;
+  doc["accel_y"] = ay_raw;
+  doc["accel_z"] = az_raw;
+
+  doc["gyro_x"] = gx_dps;
+  doc["gyro_y"] = gy_dps;
+  doc["gyro_z"] = gz_dps;
+
+  // Pulse + SpO2
+  doc["heartRate"] = (int)round(avgBPM);
+  doc["spo2"] = spo2;
+  doc["hr_spo2"] = hr_spo2;
+
+  doc["wifi"] = (WiFi.status() == WL_CONNECTED) ? "ok" : "lost";
+  doc["timestamp"] = millis() / 1000.0f;
+
+  String out;
+  serializeJson(doc, out);
+  Serial.println(out);
+  webSocket.broadcastTXT(out);
 }
 
-void displayOrientationPage() {
-  display.setCursor(0, 0);
-  display.println("ORIENTATION");
-  display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
-  
-  display.setTextSize(1);
-  
-  // Pitch
-  display.setCursor(0, 15);
-  display.print("Pitch:");
-  display.setCursor(60, 15);
-  display.print(pitch, 1);
-  display.print((char)247); // degree symbol
-  
-  // Roll
-  display.setCursor(0, 30);
-  display.print("Roll:");
-  display.setCursor(60, 30);
-  display.print(roll, 1);
-  display.print((char)247);
-  
-  // Yaw
-  display.setCursor(0, 45);
-  display.print("Yaw:");
-  display.setCursor(60, 45);
-  display.print(yaw, 1);
-  display.print((char)247);
-}
-
-void displayExercisePage() {
-  display.setCursor(0, 0);
-  display.println("EXERCISE");
-  display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
-  
-  // Exercise name
-  display.setTextSize(2);
-  display.setCursor(0, 15);
-  display.println(currentExercise);
-  
-  // Rep count
-  display.setTextSize(1);
-  display.setCursor(0, 35);
-  display.print("Reps: ");
-  display.setTextSize(2);
-  display.print(repCount);
-  
-  // Connection status
-  display.setTextSize(1);
-  display.setCursor(0, 55);
-  if (webSocket.connectedClients() > 0) {
-    display.print("Connected");
-  } else {
-    display.print("No clients");
-  }
-}
-
-void displayMessage(const char* line1, const char* line2, int delayMs) {
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
-  
-  display.setCursor(0, 10);
-  display.println(line1);
-  
-  display.setTextSize(1);
-  display.setCursor(0, 35);
-  display.println(line2);
-  
-  display.display();
-  
-  if (delayMs > 0) {
-    delay(delayMs);
-  }
-}
-
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
-  switch(type) {
-    case WStype_DISCONNECTED:
-      Serial.printf("[%u] Disconnected\n", num);
-      break;
-      
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
     case WStype_CONNECTED:
-      {
-        IPAddress ip = webSocket.remoteIP(num);
-        Serial.printf("[%u] Connected from %d.%d.%d.%d\n", 
-                      num, ip[0], ip[1], ip[2], ip[3]);
-        
-        StaticJsonDocument<128> doc;
-        doc["status"] = "connected";
-        doc["device"] = "ESP32 Fitness Tracker";
-        String response;
-        serializeJson(doc, response);
-        webSocket.sendTXT(num, response);
-      }
+      webSocket.sendTXT(num, "{\"status\":\"connected\"}");
       break;
-      
-    case WStype_TEXT:
-      {
-        String command = String((char*)payload);
-        Serial.printf("Received: %s\n", command.c_str());
-        
-        // Parse JSON commands
-        StaticJsonDocument<256> doc;
-        DeserializationError error = deserializeJson(doc, command);
-        
-        if (!error) {
-          if (doc.containsKey("command")) {
-            String cmd = doc["command"].as<String>();
-            
-            if (cmd == "calibrate") {
-              calibrateMPU6050();
-              webSocket.sendTXT(num, "{\"status\":\"calibrated\"}");
-              
-            } else if (cmd == "reset_yaw") {
-              yaw = 0;
-              webSocket.sendTXT(num, "{\"status\":\"yaw_reset\"}");
-              
-            } else if (cmd == "reset_reps") {
-              repCount = 0;
-              webSocket.sendTXT(num, "{\"status\":\"reps_reset\"}");
-              
-            } else if (cmd == "set_exercise") {
-              currentExercise = doc["exercise"].as<String>();
-              webSocket.sendTXT(num, "{\"status\":\"exercise_set\"}");
-            }
-          }
-        }
-      }
-      break;
-  }
+    default:
+      break;
+  }
 }
-

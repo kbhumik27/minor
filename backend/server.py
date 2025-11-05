@@ -89,37 +89,73 @@ async def connect_to_esp32(esp32_url):
                     print(f"\n📡 Raw ESP32 data keys: {list(data.keys())}")
                     
                     # Update global state with ESP32 data
-                    # Important: Only update fields that are present in ESP32 data
-                    for key in ['ax', 'ay', 'az', 'gx', 'gy', 'gz', 'pitch', 'roll', 'yaw']:
+                    # Handle both old key names (ax, ay, az) and new key names (accel_x, accel_y, accel_z)
+                    # ESP32 sends: accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z
+                    
+                    # Map ESP32 keys to internal keys
+                    if 'accel_x' in data:
+                        sensor_data['ax'] = data['accel_x']  # Already in g units from ESP32
+                    elif 'ax' in data:
+                        sensor_data['ax'] = data['ax']
+                    
+                    if 'accel_y' in data:
+                        sensor_data['ay'] = data['accel_y']
+                    elif 'ay' in data:
+                        sensor_data['ay'] = data['ay']
+                    
+                    if 'accel_z' in data:
+                        sensor_data['az'] = data['accel_z']
+                    elif 'az' in data:
+                        sensor_data['az'] = data['az']
+                    
+                    if 'gyro_x' in data:
+                        sensor_data['gx'] = data['gyro_x']  # Already in deg/s from ESP32
+                    elif 'gx' in data:
+                        sensor_data['gx'] = data['gx']
+                    
+                    if 'gyro_y' in data:
+                        sensor_data['gy'] = data['gyro_y']
+                    elif 'gy' in data:
+                        sensor_data['gy'] = data['gy']
+                    
+                    if 'gyro_z' in data:
+                        sensor_data['gz'] = data['gyro_z']
+                    elif 'gz' in data:
+                        sensor_data['gz'] = data['gz']
+                    
+                    # Update pitch, roll, yaw directly (already computed by ESP32)
+                    for key in ['pitch', 'roll', 'yaw']:
                         if key in data:
                             sensor_data[key] = data[key]
                     
-                    # Scale accelerometer and gyro for frontend display
-                    sensor_data['ax'] = data.get('ax', 0) / 16384.0
-                    sensor_data['ay'] = data.get('ay', 0) / 16384.0  
-                    sensor_data['az'] = data.get('az', 0) / 16384.0
-                    sensor_data['gx'] = data.get('gx', 0) / 131.0
-                    sensor_data['gy'] = data.get('gy', 0) / 131.0
-                    sensor_data['gz'] = data.get('gz', 0) / 131.0
-                    
                     # IMPORTANT: Only update pulse if ESP32 sends it
                     # This prevents default values from overriding real sensor data
-                    if 'pulse' in data:
+                    if 'heartRate' in data:
+                        sensor_data['pulse'] = data['heartRate']
+                        sensor_data['heartRate'] = data['heartRate']
+                        print(f"  ✓ Pulse/HeartRate from ESP32: {data['heartRate']} BPM")
+                    elif 'pulse' in data:
                         sensor_data['pulse'] = data['pulse']
-                        sensor_data['heartRate'] = data['pulse']  # Keep both for compatibility
+                        sensor_data['heartRate'] = data['pulse']
                         print(f"  ✓ Pulse/HeartRate from ESP32: {data['pulse']} BPM")
+                    
                     if 'spo2' in data:
                         sensor_data['spo2'] = data['spo2']
                         print(f"  ✓ SpO2 from ESP32: {data['spo2']}%")
+                    
+                    if 'hr_spo2' in data:
+                        # hr_spo2 is the heart rate from MAX30100 sensor
+                        print(f"  ✓ HR from MAX30100: {data['hr_spo2']} BPM")
+                    
                     if 'beatDetected' in data:
                         sensor_data['beatDetected'] = data['beatDetected']
                         print(f"  ✓ Beat from ESP32: {data['beatDetected']}")
                     
-                    # Add to buffer for AI
+                    # Add to buffer for AI - use the mapped sensor_data values
                     sensor_buffer.append([
-                        data.get('ax', 0), data.get('ay', 0), data.get('az', 0),
-                        data.get('gx', 0), data.get('gy', 0), data.get('gz', 0),
-                        data.get('pitch', 0), data.get('roll', 0), data.get('yaw', 0)
+                        sensor_data.get('ax', 0), sensor_data.get('ay', 0), sensor_data.get('az', 0),
+                        sensor_data.get('gx', 0), sensor_data.get('gy', 0), sensor_data.get('gz', 0),
+                        sensor_data.get('pitch', 0), sensor_data.get('roll', 0), sensor_data.get('yaw', 0)
                     ])
                     
                     # Analyze form only when analyzer is in 'workout' mode and exercise selected
