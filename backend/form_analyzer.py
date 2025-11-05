@@ -480,13 +480,24 @@ class FormAnalyzer:
         # Store movement data for temporal analysis
         self._update_movement_history(pitch, roll)
         
-        # Enhanced rep detection based on pitch/roll changes
+        # Enhanced rep detection based on pitch/roll changes with cooldown
+        # Add cooldown timer to prevent counting too fast
+        if not hasattr(self, 'last_rep_time_cooldown'):
+            self.last_rep_time_cooldown = 0
+        
+        current_time = datetime.now().timestamp()
+        time_since_last_rep = current_time - self.last_rep_time_cooldown
+        
+        # Require at least 1 second between reps to prevent double counting
+        cooldown_period = 1.0  # seconds
+        
         pitch_change = abs(pitch - self.last_pitch)
         roll_change = abs(roll - self.last_roll)
         
-        if pitch_change > self.rep_threshold or roll_change > self.rep_threshold:
+        if (pitch_change > self.rep_threshold or roll_change > self.rep_threshold) and time_since_last_rep >= cooldown_period:
             rep_detected = True
             self.rep_count += 1
+            self.last_rep_time_cooldown = current_time
             print(f"DEBUG: Rep detected! Pitch change: {pitch_change:.1f}°, Roll change: {roll_change:.1f}°, Total reps: {self.rep_count}")
         
         # Update last positions
@@ -812,152 +823,61 @@ class FormAnalyzer:
         gy = float(sensor_data.get('gy', 0.0) or 0.0)
         gz = float(sensor_data.get('gz', 0.0) or 0.0)
 
-        # Debug print to verify we're getting data
-        print(f"🔍 FormAnalyzer received: ax={ax:.3f}, ay={ay:.3f}, az={az:.3f}, gx={gx:.1f}, gy={gy:.1f}, gz={gz:.1f}")
-
-        # Calculate acceleration magnitude (in g units, not raw)
-        acc_magnitude = math.sqrt(ax*ax + ay*ay + az*az)
-        
-        # Append to buffer
-        self._step_buffer.append((ts, acc_magnitude))
-
-        # IMPROVED STEP DETECTION ALGORITHM
+        # SIMPLE STEP DETECTION - Based on acceleration magnitude threshold
         step_detected = False
         now = ts
         
-        # Only detect steps if enough data in buffer
-        if len(self._step_buffer) >= 5:
-            # Get recent magnitudes
-            recent_mags = [m for _, m in list(self._step_buffer)[-10:]]
-            current_mag = acc_magnitude
-            
-            # Calculate dynamic threshold based on moving average and std
-            window_mags = [m for _, m in self._step_buffer]
-            mean_mag = float(np.mean(window_mags))
-            std_mag = float(np.std(window_mags))
-            
-            # Adaptive threshold for real sensor data (in g units, not raw ADC)
-            # Typical walking creates acceleration variations of 0.1-0.3g
-            # Running creates variations of 0.3-0.8g
-            threshold = mean_mag + max(0.15, 1.2 * std_mag)
-            
-            # For demo mode, use a much lower fixed threshold to ensure steps are detected
-            if self.demo_mode.running:
-                threshold = 0.5  # Much lower threshold for demo data
-                # For demo mode, also use a simpler detection: any significant peak
-                if current_mag > threshold and len(recent_mags) >= 3:
-                    # Simple peak detection for demo mode
-                    prev_mag = recent_mags[-2] if len(recent_mags) >= 2 else 0
-                    if current_mag > prev_mag + 0.2:  # Significant increase
-                        step_detected = True
-                        self.step_count += 1
-                        print(f"👟 Demo step detected! Total: {self.step_count}")
-            else:
-                # Peak detection: current value is a local maximum above threshold
-                if len(recent_mags) >= 5:
-                    mid_idx = 2  # Check if the middle value is a peak
-                    is_peak = (recent_mags[mid_idx] > threshold and
-                              recent_mags[mid_idx] > recent_mags[mid_idx-1] and
-                              recent_mags[mid_idx] > recent_mags[mid_idx-2] and
-                              recent_mags[mid_idx] > recent_mags[mid_idx+1] and
-                              recent_mags[mid_idx] > recent_mags[mid_idx+2])
-                    
-                    # Verify time constraint between steps
-                    if is_peak:
-                        if self._last_step_time is None:
-                            step_detected = True
-                            self._last_step_time = now
-                            self.step_count += 1
-                            print(f"👟 ESP32 step detected! Total: {self.step_count}, Mag: {recent_mags[mid_idx]:.3f}g, Threshold: {threshold:.3f}g")
-                        else:
-                            time_since_last = now - self._last_step_time
-                            if self._min_step_interval <= time_since_last <= self._max_step_interval:
-                                step_detected = True
-                                self._last_step_time = now
-                                self.step_count += 1
-                                print(f"👟 ESP32 step detected! Total: {self.step_count}, Mag: {recent_mags[mid_idx]:.3f}g, Threshold: {threshold:.3f}g, Interval: {time_since_last:.2f}s")
+        # Calculate acceleration magnitude (in g units)
+        acc_magnitude = math.sqrt(ax*ax + ay*ay + az*az)
+        
+        # Simple threshold-based step detection
+        # When acceleration changes significantly from gravity (1g), it's likely a step
+        acc_deviation = abs(acc_magnitude - 1.0)  # Deviation from gravity
+        
+        # Initialize last step time if not set
+        if not hasattr(self, '_simple_last_step_time'):
+            self._simple_last_step_time = 0
+        
+        # Detect step if deviation is significant AND enough time has passed since last step
+        step_threshold = 0.2  # 0.2g deviation threshold (sensitive but not too sensitive)
+        min_step_time = 0.3  # Minimum 300ms between steps
+        
+        time_since_last = now - self._simple_last_step_time
+        
+        if acc_deviation > step_threshold and time_since_last > min_step_time:
+            step_detected = True
+            self.step_count += 1
+            self._simple_last_step_time = now
+            print(f"👟 Step detected! Total: {self.step_count}, Acc deviation: {acc_deviation:.3f}g")
+        
+        # Simple cadence calculation (not used but kept for compatibility)
+        cadence_spm = 0
 
-        # Calculate cadence (steps per minute) using last 10 seconds
-        window_start = now - 10.0
-        steps_recent = [t for t, _ in self._step_buffer if t >= window_start]
-        steps_in_window = len([t for t in steps_recent if t >= window_start - 0.5])  # Count actual steps
-        cadence_spm = steps_in_window * 6  # Scale 10s window to per-minute
-
-        # ACTIVITY CLASSIFICATION using trained model
+        # SIMPLIFIED ACTIVITY CLASSIFICATION - Just use gyroscope magnitude
         activity = 'stationary'
         confidence = 0.5
         gyro_magnitude = math.sqrt(gx*gx + gy*gy + gz*gz)
         
-        if self.activity_model is not None and self.mode == 'normal':
-            try:
-                # Prepare features for the model (match training feature set)
-                # Model was trained on raw sensor values, but ESP32 sends in g and deg/s
-                # Need to convert back to approximate raw values for model compatibility
-                # MPU6050: ±2g range = 16384 LSB/g, ±250°/s range = 131 LSB/°/s
-                ax_raw = ax * 16384.0
-                ay_raw = ay * 16384.0
-                az_raw = az * 16384.0
-                gx_raw = gx * 131.0
-                gy_raw = gy * 131.0
-                gz_raw = gz * 131.0
-                
-                # Calculate magnitudes in raw units
-                acc_mag_raw = math.sqrt(ax_raw*ax_raw + ay_raw*ay_raw + az_raw*az_raw)
-                gyro_mag_raw = math.sqrt(gx_raw*gx_raw + gy_raw*gy_raw + gz_raw*gz_raw)
-                
-                features = np.array([[ax_raw, ay_raw, az_raw, gx_raw, gy_raw, gz_raw, acc_mag_raw, gyro_mag_raw]])
-                
-                # Predict activity
-                prediction = self.activity_model.predict(features)[0]
-                
-                # Get confidence if model supports predict_proba
-                if hasattr(self.activity_model, 'predict_proba'):
-                    proba = self.activity_model.predict_proba(features)[0]
-                    confidence = float(np.max(proba))
-                else:
-                    confidence = 0.8  # Default confidence if not available
-                
-                activity = str(prediction).lower()
-                
-                # Map model predictions to activity names
-                activity_map = {
-                    's': 'stationary',
-                    't': 'stationary', 
-                    'w': 'walking',
-                    'r': 'running',
-                    'x': 'stationary'
-                }
-                activity = activity_map.get(activity, 'unknown')
-                
-                print(f"🎯 Activity classified: {activity} (confidence: {confidence:.2f}, prediction: {prediction})")
-                
-            except Exception as e:
-                print(f"⚠ Activity prediction error: {e}")
-                import traceback
-                traceback.print_exc()
-                # Fallback to simple heuristic
-                activity, confidence = self._simple_activity_classification(
-                    cadence_spm, acc_magnitude, gyro_magnitude
-                )
+        # Simple heuristic based on gyroscope activity level
+        if gyro_magnitude > 150:
+            activity = 'running'
+            confidence = 0.8
+        elif gyro_magnitude > 80:
+            activity = 'walking'
+            confidence = 0.7
         else:
-            # Fallback to simple heuristic when model not available or in workout mode
-            activity, confidence = self._simple_activity_classification(
-                cadence_spm, acc_magnitude, gyro_magnitude
-            )
-            print(f"🎯 Activity (heuristic): {activity} (confidence: {confidence:.2f})")
-
-        # Running speed estimation using MPU6050 step detection
-        height_m = max(0.5, self.user_height_cm / 100.0)
+            activity = 'stationary'
+            confidence = 0.9
         
-        if activity == 'running':
-            stride_m = 0.65 * height_m
-        elif activity == 'walking':
-            stride_m = 0.415 * height_m
-        else:
-            stride_m = 0.0
+        print(f"🎯 Activity: {activity} (gyro_mag: {gyro_magnitude:.1f}, confidence: {confidence:.2f})")
 
-        running_speed_m_s = (cadence_spm / 60.0) * stride_m
-        running_speed_kmh = running_speed_m_s * 3.6
+        # Simplified speed estimation based on activity type
+        if activity == 'running':
+            running_speed_kmh = 10.0  # Default running speed
+        elif activity == 'walking':
+            running_speed_kmh = 5.0  # Default walking speed
+        else:
+            running_speed_kmh = 0.0
 
         # ✅ CALORIE ESTIMATION - Uses actual MAX30100 pulse readings
         # Get actual pulse from sensor

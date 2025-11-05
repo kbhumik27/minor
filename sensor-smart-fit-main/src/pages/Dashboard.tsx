@@ -578,8 +578,15 @@ const Dashboard = () => {
                     <div />
                   )}
 
-                  {/* Empty space where form score card was - now handled by FormFeedback component */}
-                  <div />
+                  {/* Form Analysis Card next to Rep Counter */}
+                  {mode === 'workout' ? (
+                    <FormFeedback 
+                      formScore={sensorData.formScore || 0}
+                      feedback={sensorData.feedback || "Ready to start"}
+                    />
+                  ) : (
+                    <div />
+                  )}
 
                   <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated">
                     <CardHeader className="border-b border-border/50">
@@ -674,16 +681,6 @@ const Dashboard = () => {
                   </CardContent>
                 </Card>
               </div>
-
-              {/* Form Feedback - Takes up 1 column (only visible in workout mode) */}
-              {mode === 'workout' && (
-                <div className="transition-all duration-300">
-                  <FormFeedback 
-                    formScore={sensorData.formScore || 0}
-                    feedback={sensorData.feedback || "Ready to start"}
-                  />
-                </div>
-              )}
             </div>
 
             {/* Orientation Metrics */}
