@@ -358,8 +358,9 @@ class DemoMode:
             'pitch': self._apply_natural_variation(self.current_angle),
             'roll': roll,
             'yaw': random.uniform(-5, 5),
-            'heartRate': displayed_hr,  # Realistic BPM value
+            'heartRate': displayed_hr,  # Heart rate in BPM
             'pulse': displayed_hr,  # Pulse matches heart rate in BPM
+            'spo2': 98,  # Default SpO2 for demo
             'beatDetected': beat_detected,
             'repCount': self.rep_count,
             'exercise': self.exercise,
@@ -436,14 +437,20 @@ class FormAnalyzer:
         self._load_activity_model()
         
         # Step detection parameters
-        self._step_threshold = 1.2  # g-force threshold for step detection
+        self._step_threshold = 2000  # g-force threshold for step detection (adjusted for raw values)
         self._min_step_interval = 0.3  # Minimum 300ms between steps
         self._max_step_interval = 2.0  # Maximum 2s between steps
         self._peak_buffer = deque(maxlen=10)  # Track recent peaks
+        
+        # Add rep counter variables
+        self.rep_count = 0
+        self.last_pitch = 0
+        self.last_roll = 0
+        self.rep_threshold = 15.0  # Degrees for pitch/roll change to detect rep
     
     def _load_activity_model(self):
         """Load the trained activity classifier model"""
-        model_path = os.path.join(os.path.dirname(__file__), 'model.joblib')
+        model_path = os.path.join(os.path.dirname(__file__), '..', 'model', 'model.joblib')
         try:
             if os.path.exists(model_path):
                 self.activity_model = joblib.load(model_path)
@@ -473,13 +480,26 @@ class FormAnalyzer:
         # Store movement data for temporal analysis
         self._update_movement_history(pitch, roll)
         
+        # Enhanced rep detection based on pitch/roll changes
+        pitch_change = abs(pitch - self.last_pitch)
+        roll_change = abs(roll - self.last_roll)
+        
+        if pitch_change > self.rep_threshold or roll_change > self.rep_threshold:
+            rep_detected = True
+            self.rep_count += 1
+            print(f"DEBUG: Rep detected! Pitch change: {pitch_change:.1f}°, Roll change: {roll_change:.1f}°, Total reps: {self.rep_count}")
+        
+        # Update last positions
+        self.last_pitch = pitch
+        self.last_roll = roll
+        
         # Get exercise-specific analysis (wrist-compatible exercises only)
         if exercise == 'bicep_curl':
-            score, feedback, rep_detected = self._analyze_bicep_curl(pitch, roll, sensor_data)
+            score, feedback, _ = self._analyze_bicep_curl(pitch, roll, sensor_data)
         elif exercise == 'lateral_raise':
-            score, feedback, rep_detected = self._analyze_lateral_raise(pitch, roll, sensor_data)
+            score, feedback, _ = self._analyze_lateral_raise(pitch, roll, sensor_data)
         elif exercise == 'shoulder_press':
-            score, feedback, rep_detected = self._analyze_shoulder_press(pitch, roll, sensor_data)
+            score, feedback, _ = self._analyze_shoulder_press(pitch, roll, sensor_data)
         elif exercise == 'running':
             # Running handled primarily by activity/step detection
             score = 100
@@ -761,6 +781,15 @@ class FormAnalyzer:
         if mode in ('normal', 'workout'):
             self.mode = mode
 
+    def reset_counters(self):
+        """Reset step and rep counters"""
+        self.step_count = 0
+        self.rep_count = 0
+        self.last_pitch = 0
+        self.last_roll = 0
+        self._last_step_time = None
+        print("DEBUG: Counters reset - steps: 0, reps: 0")
+
     def _process_activity_and_steps(self, sensor_data):
         """Improved step detection and activity classification using trained model"""
         ts = None
@@ -775,7 +804,7 @@ class FormAnalyzer:
         else:
             ts = datetime.now().timestamp()
 
-        # Get actual sensor readings from MPU6050
+        # Get raw sensor readings from MPU6050 (as sent by ESP32)
         ax = float(sensor_data.get('ax', 0.0) or 0.0)
         ay = float(sensor_data.get('ay', 0.0) or 0.0)
         az = float(sensor_data.get('az', 0.0) or 0.0)
@@ -807,26 +836,37 @@ class FormAnalyzer:
             # Adaptive threshold: mean + 1.5*std (more robust than fixed threshold)
             threshold = mean_mag + max(0.3, 1.5 * std_mag)
             
-            # Peak detection: current value is a local maximum above threshold
-            if len(recent_mags) >= 5:
-                mid_idx = 2  # Check if the middle value is a peak
-                is_peak = (recent_mags[mid_idx] > threshold and
-                          recent_mags[mid_idx] > recent_mags[mid_idx-1] and
-                          recent_mags[mid_idx] > recent_mags[mid_idx-2] and
-                          recent_mags[mid_idx] > recent_mags[mid_idx+1] and
-                          recent_mags[mid_idx] > recent_mags[mid_idx+2])
-                
-                # Verify time constraint between steps
-                if is_peak:
-                    if self._last_step_time is None:
+            # For demo mode, use a much lower fixed threshold to ensure steps are detected
+            if self.demo_mode.running:
+                threshold = 0.5  # Much lower threshold for demo data
+                # For demo mode, also use a simpler detection: any significant peak
+                if current_mag > threshold and len(recent_mags) >= 3:
+                    # Simple peak detection for demo mode
+                    prev_mag = recent_mags[-2] if len(recent_mags) >= 2 else 0
+                    if current_mag > prev_mag + 0.2:  # Significant increase
                         step_detected = True
-                        self._last_step_time = now
-                    else:
-                        time_since_last = now - self._last_step_time
-                        if self._min_step_interval <= time_since_last <= self._max_step_interval:
+                        self.step_count += 1
+            else:
+                # Peak detection: current value is a local maximum above threshold
+                if len(recent_mags) >= 5:
+                    mid_idx = 2  # Check if the middle value is a peak
+                    is_peak = (recent_mags[mid_idx] > threshold and
+                              recent_mags[mid_idx] > recent_mags[mid_idx-1] and
+                              recent_mags[mid_idx] > recent_mags[mid_idx-2] and
+                              recent_mags[mid_idx] > recent_mags[mid_idx+1] and
+                              recent_mags[mid_idx] > recent_mags[mid_idx+2])
+                    
+                    # Verify time constraint between steps
+                    if is_peak:
+                        if self._last_step_time is None:
                             step_detected = True
                             self._last_step_time = now
-                            self.step_count += 1
+                        else:
+                            time_since_last = now - self._last_step_time
+                            if self._min_step_interval <= time_since_last <= self._max_step_interval:
+                                step_detected = True
+                                self._last_step_time = now
+                                self.step_count += 1
 
         # Calculate cadence (steps per minute) using last 10 seconds
         window_start = now - 10.0
@@ -858,6 +898,16 @@ class FormAnalyzer:
                 
                 activity = str(prediction).lower()
                 
+                # Map model predictions to activity names
+                activity_map = {
+                    's': 'stationary',
+                    't': 'stationary', 
+                    'w': 'walking',
+                    'r': 'running',
+                    'x': 'stationary'
+                }
+                activity = activity_map.get(activity, 'unknown')
+                
             except Exception as e:
                 print(f"⚠ Activity prediction error: {e}")
                 # Fallback to simple heuristic
@@ -884,9 +934,9 @@ class FormAnalyzer:
         running_speed_m_s = (cadence_spm / 60.0) * stride_m
         running_speed_kmh = running_speed_m_s * 3.6
 
-        # ✅ CALORIE ESTIMATION - Uses actual MAX30100 heart rate readings
-        # Get actual heart rate from MAX30100 sensor
-        hr = float(sensor_data.get('heartRate', 0) or 0)
+        # ✅ CALORIE ESTIMATION - Uses actual MAX30100 pulse readings
+        # Get actual pulse from sensor
+        hr = float(sensor_data.get('pulse', 0) or 0)
         calories_increment = 0.0
         
         if self._last_metric_time is None:
@@ -895,8 +945,8 @@ class FormAnalyzer:
         dt = max(0.0, now - self._last_metric_time)
         minutes = dt / 60.0 if dt > 0 else 0.0
 
-        # PRIORITY: Use heart rate if available from MAX30100
-        if hr > 0 and hr < 200 and minutes > 0:  # Validate HR is in reasonable range
+        # PRIORITY: Use pulse if available from MAX30100
+        if hr > 0 and hr < 200 and minutes > 0:  # Validate pulse is in reasonable range
             # HR-based calorie formula (gender-neutral approximation)
             # Formula: Calories/min = (-55.0969 + (0.6309 × HR) + (0.1988 × Weight) + (0.2017 × Age)) / 4.184
             # This is a research-backed formula that uses actual heart rate
@@ -908,11 +958,11 @@ class FormAnalyzer:
                 
             calories_increment = calories_per_min * minutes
             
-            # Debug log to verify HR is being used
+            # Debug log to verify pulse is being used
             if minutes > 0:
-                print(f"💓 Calorie calc using MAX30100 HR: {hr} BPM → {calories_per_min:.2f} kcal/min")
+                print(f"💓 Calorie calc using MAX30100 pulse: {hr} BPM → {calories_per_min:.2f} kcal/min")
         else:
-            # FALLBACK: MET-based approximation when HR not available
+            # FALLBACK: MET-based approximation when pulse not available
             # Uses MPU6050 activity detection to estimate METs
             met = 1.0  # Resting
             if activity == 'walking':
@@ -924,7 +974,7 @@ class FormAnalyzer:
             calories_increment = met * self.user_weight_kg * (minutes / 60.0)
             
             if minutes > 0:
-                print(f"⚠ Calorie calc using MET fallback (no HR): activity={activity}, MET={met}")
+                print(f"⚠ Calorie calc using MET fallback (no pulse): activity={activity}, MET={met}")
 
         self._calories_accum += calories_increment
         self._last_metric_time = now
@@ -946,14 +996,15 @@ class FormAnalyzer:
         activity = 'stationary'
         confidence = 0.5
         
-        if cadence_spm >= 80 or gyro_mag > 200:
+        # Higher threshold for running (150+ spm is more realistic for running)
+        if cadence_spm >= 150 or gyro_mag > 300:
             activity = 'running'
-            confidence = min(1.0, 0.5 + (cadence_spm - 80) / 120.0)
-        elif cadence_spm >= 10 or acc_mag > 1.1:
+            confidence = min(1.0, 0.6 + (cadence_spm - 150) / 100.0)
+        elif cadence_spm >= 80 or acc_mag > 1.2:
             activity = 'walking'
-            confidence = min(0.9, 0.3 + cadence_spm / 120.0)
+            confidence = min(0.9, 0.4 + cadence_spm / 150.0)
         else:
             activity = 'stationary'
-            confidence = 0.6 if gyro_mag > 50 else 0.9
+            confidence = 0.7 if gyro_mag > 50 else 0.9
             
         return activity, confidence

@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.parent
-FRONTEND_DIR = BASE_DIR / 'frontend' / 'frontend'
+FRONTEND_DIR = BASE_DIR / 'sensor-smart-fit-main'  # Corrected path to match actual frontend location
 FRONTEND_BUILD_DIR = FRONTEND_DIR / 'dist'
 
 def main():

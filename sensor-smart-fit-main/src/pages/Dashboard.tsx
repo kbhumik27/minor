@@ -29,6 +29,7 @@ interface SensorData {
   yaw: number;
   heartRate: number;
   pulse: number;
+  spo2: number;
   beatDetected: boolean;
   repCount: number;
   exercise: string;
@@ -59,7 +60,7 @@ const Dashboard = () => {
   const [sensorData, setSensorData] = useState<SensorData>({
     ax: 0, ay: 0, az: 0, gx: 0, gy: 0, gz: 0,
     pitch: 0, roll: 0, yaw: 0,
-    heartRate: 0, pulse: 0, beatDetected: false,
+    heartRate: 0, pulse: 0, spo2: 98, beatDetected: false,
     repCount: 0, exercise: "Ready", timestamp: 0
   });
   const [selectedExercise, setSelectedExercise] = useState("bicep_curl");
@@ -88,8 +89,8 @@ const Dashboard = () => {
       
       // Debug log to verify heart rate data is being received
       console.log('Received sensor data:', {
-        heartRate: data.heartRate,
         pulse: data.pulse,
+        spo2: data.spo2,
         beatDetected: data.beatDetected,
         timestamp: new Date().toISOString()
       });
@@ -577,27 +578,8 @@ const Dashboard = () => {
                     <div />
                   )}
 
-                  {mode === 'workout' ? (
-                    <Card className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 backdrop-blur-xl border-blue-500/30 hover:shadow-glow hover:shadow-blue-500/20 transition-all duration-300">
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2 text-lg">
-                          <Gauge className="w-5 h-5 text-blue-500" />
-                          Form Score
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="text-5xl font-bold text-blue-500 mb-2">
-                          {sensorData.formScore || 0}
-                          <span className="text-2xl text-muted-foreground">/100</span>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {sensorData.feedback || "Ready to start"}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    <div />
-                  )}
+                  {/* Empty space where form score card was - now handled by FormFeedback component */}
+                  <div />
 
                   <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated">
                     <CardHeader className="border-b border-border/50">
@@ -668,8 +650,9 @@ const Dashboard = () => {
             {/* Heart Rate Waveform */}
             <div className="mb-8">
               <HeartRateWaveform 
-                heartRate={sensorData.heartRate}
+                heartRate={sensorData.pulse}
                 pulse={sensorData.pulse}
+                spo2={sensorData.spo2 || 98}
                 beatDetected={sensorData.beatDetected}
               />
             </div>

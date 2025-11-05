@@ -5,10 +5,11 @@ import { useEffect, useRef, useState } from "react";
 interface HeartRateWaveformProps {
   heartRate: number;
   pulse: number;
+  spo2: number;
   beatDetected: boolean;
 }
 
-const HeartRateWaveform = ({ heartRate, pulse, beatDetected }: HeartRateWaveformProps) => {
+const HeartRateWaveform = ({ heartRate, pulse, spo2, beatDetected }: HeartRateWaveformProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [ppgData, setPpgData] = useState<number[]>(new Array(100).fill(512));
   const animationRef = useRef<number>();
@@ -119,7 +120,7 @@ const HeartRateWaveform = ({ heartRate, pulse, beatDetected }: HeartRateWaveform
       ctx.fillStyle = "rgba(239, 68, 68, 0.8)";
       ctx.font = "12px sans-serif";
       ctx.fillText("PPG Signal", 10, 20);
-      ctx.fillText(`${heartRate} BPM`, canvas.width - 70, 20);
+      ctx.fillText(`${pulse} BPM`, canvas.width - 70, 20);
 
       animationRef.current = requestAnimationFrame(animate);
     };
@@ -131,7 +132,7 @@ const HeartRateWaveform = ({ heartRate, pulse, beatDetected }: HeartRateWaveform
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [ppgData, heartRate, beatDetected]);
+  }, [ppgData, pulse, beatDetected]);
 
   const getHeartRateZone = (hr: number) => {
     if (hr < 60) return { zone: "Resting", color: "text-blue-500" };
@@ -141,7 +142,7 @@ const HeartRateWaveform = ({ heartRate, pulse, beatDetected }: HeartRateWaveform
     return { zone: "Maximum", color: "text-red-500" };
   };
 
-  const zone = getHeartRateZone(heartRate);
+  const zone = getHeartRateZone(pulse);
 
   return (
     <Card className="bg-card/80 backdrop-blur-xl border-red-500/30 shadow-elevated transition-all duration-300 hover:shadow-xl hover:shadow-red-500/20">
@@ -178,16 +179,16 @@ const HeartRateWaveform = ({ heartRate, pulse, beatDetected }: HeartRateWaveform
               <div className="text-xs font-semibold text-pink-500">PULSE</div>
             </div>
             <div className="text-3xl font-bold text-pink-500">{pulse}</div>
-            <div className="text-xs text-muted-foreground mt-1">signal</div>
+            <div className="text-xs text-muted-foreground mt-1">BPM</div>
           </div>
 
-          <div className="text-center p-4 rounded-lg bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/20">
+          <div className="text-center p-4 rounded-lg bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20">
             <div className="flex items-center justify-center gap-2 mb-2">
-              <Activity className="w-4 h-4 text-purple-500" />
-              <div className="text-xs font-semibold text-purple-500">ZONE</div>
+              <Activity className="w-4 h-4 text-blue-500" />
+              <div className="text-xs font-semibold text-blue-500">SpO2</div>
             </div>
-            <div className={`text-xl font-bold ${zone.color}`}>{zone.zone}</div>
-            <div className="text-xs text-muted-foreground mt-1">intensity</div>
+            <div className="text-3xl font-bold text-blue-500">{spo2}</div>
+            <div className="text-xs text-muted-foreground mt-1">%</div>
           </div>
         </div>
 

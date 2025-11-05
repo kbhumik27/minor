@@ -18,8 +18,8 @@ from pathlib import Path
 
 # Get the base directory (parent of backend folder)
 BASE_DIR = Path(__file__).parent.parent
-FRONTEND_BUILD_DIR = BASE_DIR / 'frontend' / 'frontend' / 'dist'
-FRONTEND_DEV_DIR = BASE_DIR / 'frontend' / 'frontend'
+FRONTEND_BUILD_DIR = BASE_DIR / 'sensor-smart-fit-main' / 'dist'  # Corrected path
+FRONTEND_DEV_DIR = BASE_DIR / 'sensor-smart-fit-main'
 
 # Determine if we're in development or production mode
 DEV_MODE = os.getenv('FLASK_ENV') == 'development' or not FRONTEND_BUILD_DIR.exists()
@@ -33,7 +33,7 @@ sensor_data = {
     'ax': 0, 'ay': 0, 'az': 0,
     'gx': 0, 'gy': 0, 'gz': 0,
     'pitch': 0, 'roll': 0, 'yaw': 0,
-    'heartRate': 70, 'pulse': 512,
+    'heartRate': 70, 'pulse': 70, 'spo2': 98,
     'beatDetected': False,
     'repCount': 0,
     'exercise': 'Ready',
@@ -94,14 +94,23 @@ async def connect_to_esp32(esp32_url):
                         if key in data:
                             sensor_data[key] = data[key]
                     
-                    # IMPORTANT: Only update heart rate if ESP32 sends it
+                    # Scale accelerometer and gyro for frontend display
+                    sensor_data['ax'] = data.get('ax', 0) / 16384.0
+                    sensor_data['ay'] = data.get('ay', 0) / 16384.0  
+                    sensor_data['az'] = data.get('az', 0) / 16384.0
+                    sensor_data['gx'] = data.get('gx', 0) / 131.0
+                    sensor_data['gy'] = data.get('gy', 0) / 131.0
+                    sensor_data['gz'] = data.get('gz', 0) / 131.0
+                    
+                    # IMPORTANT: Only update pulse if ESP32 sends it
                     # This prevents default values from overriding real sensor data
-                    if 'heartRate' in data:
-                        sensor_data['heartRate'] = data['heartRate']
-                        print(f"  ✓ HR from ESP32: {data['heartRate']}")
                     if 'pulse' in data:
                         sensor_data['pulse'] = data['pulse']
-                        print(f"  ✓ Pulse from ESP32: {data['pulse']}")
+                        sensor_data['heartRate'] = data['pulse']  # Keep both for compatibility
+                        print(f"  ✓ Pulse/HeartRate from ESP32: {data['pulse']} BPM")
+                    if 'spo2' in data:
+                        sensor_data['spo2'] = data['spo2']
+                        print(f"  ✓ SpO2 from ESP32: {data['spo2']}%")
                     if 'beatDetected' in data:
                         sensor_data['beatDetected'] = data['beatDetected']
                         print(f"  ✓ Beat from ESP32: {data['beatDetected']}")
@@ -147,8 +156,56 @@ async def connect_to_esp32(esp32_url):
                     except Exception:
                         pass
                     
-                    # Debug print to verify heart rate is being received
-                    print(f"📊 Current sensor_data - HR: {sensor_data.get('heartRate', 'N/A')}, Pulse: {sensor_data.get('pulse', 'N/A')}, Beat: {sensor_data.get('beatDetected', 'N/A')}")
+                    # Debug print to verify pulse is being received
+                    print(f"📊 Current sensor_data - HeartRate: {sensor_data.get('heartRate', 'N/A')} BPM, Pulse: {sensor_data.get('pulse', 'N/A')} BPM, SpO2: {sensor_data.get('spo2', 'N/A')}%, Beat: {sensor_data.get('beatDetected', 'N/A')}")
+                    print(f"   Exercise: {sensor_data.get('exercise')}, Pitch: {sensor_data.get('pitch', 0):.1f}°\n")
+                    if 'beatDetected' in data:
+                        sensor_data['beatDetected'] = data['beatDetected']
+                        print(f"  ✓ Beat from ESP32: {data['beatDetected']}")
+                    
+                    # Add to buffer for AI
+                    sensor_buffer.append([
+                        data.get('ax', 0), data.get('ay', 0), data.get('az', 0),
+                        data.get('gx', 0), data.get('gy', 0), data.get('gz', 0),
+                        data.get('pitch', 0), data.get('roll', 0), data.get('yaw', 0)
+                    ])
+                    
+                    # Analyze form only when analyzer is in 'workout' mode and exercise selected
+                    analyzer_mode = getattr(form_analyzer, 'mode', 'normal')
+                    if sensor_data.get('exercise') != 'Ready' and analyzer_mode == 'workout':
+                        score, feedback, rep_detected = form_analyzer.analyze(
+                            sensor_data.get('exercise', 'bicep_curl'),
+                            data.get('pitch', 0),
+                            data.get('roll', 0),
+                            data  # Pass full ESP32 data to prevent synthetic HR generation
+                        )
+
+                        sensor_data['formScore'] = score
+                        sensor_data['feedback'] = ' | '.join(feedback) if feedback else ''
+
+                        # Get mesh data for visualization
+                        sensor_data['meshData'] = form_analyzer.get_mesh_data()
+
+                        # Increment rep count if detected
+                        if rep_detected:
+                            sensor_data['repCount'] = sensor_data.get('repCount', 0) + 1
+
+                    # Always merge analyzer-derived metrics (steps, activity, speed, calories)
+                    try:
+                        metrics = getattr(form_analyzer, 'latest_metrics', None)
+                        if metrics:
+                            # Map keys into sensor_data for frontends
+                            sensor_data['stepCount'] = metrics.get('stepCount', sensor_data.get('stepCount', 0))
+                            sensor_data['stepDetected'] = metrics.get('stepDetected', False)
+                            sensor_data['activity'] = metrics.get('activity', sensor_data.get('activity', 'unknown'))
+                            sensor_data['activityConfidence'] = metrics.get('activityConfidence', 0.0)
+                            sensor_data['runningSpeedKmh'] = metrics.get('runningSpeedKmh', 0.0)
+                            sensor_data['caloriesTotal'] = metrics.get('caloriesTotal', 0.0)
+                    except Exception:
+                        pass
+                    
+                    # Debug print to verify pulse is being received
+                    print(f"📊 Current sensor_data - Pulse: {sensor_data.get('pulse', 'N/A')} BPM, SpO2: {sensor_data.get('spo2', 'N/A')}%, Beat: {sensor_data.get('beatDetected', 'N/A')}")
                     print(f"   Exercise: {sensor_data.get('exercise')}, Pitch: {sensor_data.get('pitch', 0):.1f}°\n")
                     
                     # Broadcast to all connected clients
@@ -261,9 +318,10 @@ def start_demo():
     
     # Start demo mode
     demo_mode = True
-    # When starting a demo workout, put analyzer into workout mode
+    # Use normal mode for demo so ML model can classify activities properly
     try:
-        form_analyzer.set_mode('workout')
+        form_analyzer.set_mode('normal')
+        form_analyzer.reset_counters()  # Reset counters for fresh demo
     except Exception:
         pass
     result = form_analyzer.start_demo(exercise)
@@ -387,18 +445,16 @@ def stop_logging():
                         flat_entry[key] = value
                 csv_data.append(flat_entry)
             
-            # Define column order for better readability
-            if csv_data:
-                all_keys = csv_data[0].keys()
-                ordered_keys = ['timestamp', 'exercise', 'repCount', 'formScore', 'feedback',
-                               'ax', 'ay', 'az', 'gx', 'gy', 'gz', 
-                               'pitch', 'roll', 'yaw', 
-                               'heartRate', 'pulse', 'beatDetected']
-                # Add any remaining keys
-                fieldnames = [k for k in ordered_keys if k in all_keys]
-                fieldnames.extend([k for k in all_keys if k not in fieldnames])
-                
-                # Write to CSV
+                # Define column order for better readability
+                if csv_data:
+                    all_keys = csv_data[0].keys()
+                    ordered_keys = ['timestamp', 'exercise', 'repCount', 'formScore', 'feedback',
+                                   'ax', 'ay', 'az', 'gx', 'gy', 'gz', 
+                                   'pitch', 'roll', 'yaw', 
+                                   'heartRate', 'pulse', 'spo2', 'beatDetected']
+                    # Add any remaining keys
+                    fieldnames = [k for k in ordered_keys if k in all_keys]
+                    fieldnames.extend([k for k in all_keys if k not in fieldnames])
                 with open(filepath, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
                     writer.writeheader()
@@ -529,6 +585,7 @@ def set_mode():
     data = request.json
     mode = data.get('mode', 'normal')
     form_analyzer.set_mode(mode)
+    form_analyzer.reset_counters()  # Reset counters when switching modes
     sensor_data['mode'] = mode
     return jsonify({'status': 'mode_set', 'mode': mode})
 

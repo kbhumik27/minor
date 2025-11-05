@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <MAX30100_PulseOximeter.h>
 
 // WiFi credentials
 const char* ssid = "YOUR_WIFI_SSID";
@@ -16,6 +17,9 @@ WebSocketsServer webSocket = WebSocketsServer(81);
 // MPU6050 sensor
 MPU6050 mpu;
 
+// PulseOximeter sensor
+PulseOximeter pox;
+
 // OLED Display settings (128x64)
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -25,21 +29,21 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // Pin definitions
 #define HEART_RATE_PIN 34
-#define LED_PIN 2
 
 // Sensor data variables
 int16_t ax, ay, az;
 int16_t gx, gy, gz;
 float pitch = 0, roll = 0, yaw = 0;
 
-// Heart rate variables
-int hr = 70; // Current heart rate (BPM) - the main variable
+// Heart rate and SpO2 variables
 int heartRateValue = 0;
 int bpm = 0;
+int hr = 70; // Main heart rate variable
+float smoothedBPM = 70; // Initialize to 70
+int spo2 = 0;
+float smoothedSpO2 = 98; // Initialize to 98
 unsigned long lastBeatTime = 0;
 int beatThreshold = 550;
-int signal = 0;
-float smoothedBPM = 70; // Initialize to 70
 bool beatDetected = false;
 
 // Display variables
@@ -65,7 +69,6 @@ String feedback = "Start moving";
 void setup() {
   Serial.begin(115200);
   
-  pinMode(LED_PIN, OUTPUT);
   pinMode(HEART_RATE_PIN, INPUT);
   
   // Initialize I2C
@@ -103,6 +106,18 @@ void setup() {
   
   mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
   mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_250);
+  
+  // Initialize MAX30100 PulseOximeter
+  Serial.println("Initializing MAX30100...");
+  if (!pox.begin()) {
+    Serial.println("MAX30100 FAIL");
+    displayMessage("MAX30100", "Failed!", 2000);
+  } else {
+    Serial.println("MAX30100 OK");
+    displayMessage("MAX30100", "Connected", 1000);
+    pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
+    pox.setOnBeatDetectedCallback(onBeatDetected);
+  }
   
   // Calibrate
   displayMessage("Calibrating", "Keep still...", 0);
@@ -146,6 +161,9 @@ void loop() {
   
   unsigned long currentTime = millis();
   
+  // Update PulseOximeter
+  pox.update();
+  
   // Read heart rate
   if (currentTime - lastHeartRateCalc >= heartRateInterval) {
     lastHeartRateCalc = currentTime;
@@ -164,6 +182,16 @@ void loop() {
   if (currentTime - lastDisplayUpdate >= displayUpdateInterval) {
     lastDisplayUpdate = currentTime;
     updateDisplay();
+  }
+}
+
+void onBeatDetected() {
+  beatDetected = true;
+  // Reset beat detected after a short time
+  static unsigned long lastBeatReset = 0;
+  if (millis() - lastBeatReset > 100) {
+    lastBeatReset = millis();
+    // Use a timer to reset beatDetected
   }
 }
 
@@ -217,48 +245,17 @@ void calculateOrientation() {
 }
 
 void readHeartRate() {
-  signal = analogRead(HEART_RATE_PIN);
+  // Get heart rate and SpO2 from MAX30100
+  heartRateValue = pox.getHeartRate();
+  spo2 = pox.getSpO2();
   
-  static int peak = 512;
-  static int trough = 512;
-  static unsigned long lastValidBeat = 0;
-  
-  peak = max(peak * 0.95, (float)signal);
-  trough = min(trough * 1.05, (float)signal);
-  beatThreshold = (peak + trough) / 2;
-  
-  if (signal > beatThreshold && !beatDetected) {
-    beatDetected = true;
-    unsigned long currentTime = millis();
-    
-    if (lastBeatTime > 0) {
-      unsigned long beatInterval = currentTime - lastBeatTime;
-      if (beatInterval > 300 && beatInterval < 2000) {
-        bpm = 60000 / beatInterval;
-        if (smoothedBPM == 0) {
-          smoothedBPM = bpm;
-        } else {
-          smoothedBPM = (smoothedBPM * 0.7) + (bpm * 0.3);
-        }
-        lastValidBeat = currentTime;
-      }
-    }
-    lastBeatTime = currentTime;
-    digitalWrite(LED_PIN, HIGH);
-  } else if (signal < beatThreshold - 50) {
-    beatDetected = false;
-    digitalWrite(LED_PIN, LOW);
+  // Smooth the values
+  if (heartRateValue > 0) {
+    smoothedBPM = (smoothedBPM * 0.7) + (heartRateValue * 0.3);
   }
   
-  // If no valid beats detected for 5 seconds, gradually reduce BPM to resting rate
-  if (millis() - lastValidBeat > 5000 && smoothedBPM > 0) {
-    smoothedBPM = smoothedBPM * 0.99; // Slowly decrease
-    if (smoothedBPM < 60) smoothedBPM = 60; // Don't go below 60 BPM
-  }
-  
-  // Initialize smoothedBPM to a default resting rate if still 0
-  if (smoothedBPM == 0) {
-    smoothedBPM = 70; // Default resting heart rate
+  if (spo2 > 0) {
+    smoothedSpO2 = (smoothedSpO2 * 0.8) + (spo2 * 0.2);
   }
   
   // Update hr variable (main heart rate variable)
@@ -268,18 +265,19 @@ void readHeartRate() {
 void sendSensorData() {
   StaticJsonDocument<512> doc;
   
-  doc["ax"] = ax / 16384.0;
-  doc["ay"] = ay / 16384.0;
-  doc["az"] = az / 16384.0;
-  doc["gx"] = gx / 131.0;
-  doc["gy"] = gy / 131.0;
-  doc["gz"] = gz / 131.0;
+  doc["ax"] = ax;
+  doc["ay"] = ay;
+  doc["az"] = az;
+  doc["gx"] = gx;
+  doc["gy"] = gy;
+  doc["gz"] = gz;
   doc["pitch"] = round(pitch * 10) / 10.0;
   doc["roll"] = round(roll * 10) / 10.0;
   doc["yaw"] = round(yaw * 10) / 10.0;
-  doc["heartRate"] = hr; // Use hr variable
-  doc["pulse"] = signal;
+  doc["heartRate"] = hr; // Heart rate (BPM)
+  doc["pulse"] = hr; // Use hr as pulse (BPM) - same value for compatibility
   doc["beatDetected"] = beatDetected;
+  doc["spo2"] = (int)smoothedSpO2;
   doc["repCount"] = repCount;
   doc["exercise"] = currentExercise;
   doc["timestamp"] = millis();
@@ -292,8 +290,8 @@ void sendSensorData() {
   static unsigned long lastDebug = 0;
   if (millis() - lastDebug > 2000) {
     lastDebug = millis();
-    Serial.printf("💓 HR: %d BPM, Pulse: %d, Beat: %s, Clients: %d\n", 
-                  hr, signal, beatDetected ? "YES" : "NO", webSocket.connectedClients());
+    Serial.printf("💓 Heart Rate: %d BPM, Pulse: %d BPM, SpO2: %d%%, Beat: %s, Clients: %d\n", 
+                  hr, hr, (int)smoothedSpO2, beatDetected ? "YES" : "NO", webSocket.connectedClients());
   }
 }
 
@@ -328,23 +326,39 @@ void updateDisplay() {
 void displayHeartRatePage() {
   // Heart icon
   display.setCursor(0, 0);
-  display.println("HEART RATE");
+  display.println("HEART RATE & SPO2");
   display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
   
-  // Large BPM display
-  display.setTextSize(3);
-  display.setCursor(20, 20);
-  display.print(hr); // Use hr variable
-  
+  // Heart Rate display
   display.setTextSize(1);
-  display.setCursor(90, 35);
+  display.setCursor(0, 15);
+  display.print("HR:");
+  display.setTextSize(2);
+  display.setCursor(25, 12);
+  display.print(hr);
+  display.setTextSize(1);
+  display.setCursor(55, 17);
   display.print("BPM");
+  
+  // Pulse display (same as HR for now)
+  display.setCursor(0, 30);
+  display.print("Pulse:");
+  display.setCursor(45, 30);
+  display.print(hr);
+  display.print(" BPM");
+  
+  // SpO2 display
+  display.setCursor(0, 45);
+  display.print("SpO2:");
+  display.setCursor(45, 45);
+  display.print((int)smoothedSpO2);
+  display.print("%");
   
   // Beat indicator
   if (beatDetected) {
-    display.fillCircle(64, 55, 5, SSD1306_WHITE);
+    display.fillCircle(110, 55, 5, SSD1306_WHITE);
   } else {
-    display.drawCircle(64, 55, 5, SSD1306_WHITE);
+    display.drawCircle(110, 55, 5, SSD1306_WHITE);
   }
 }
 
