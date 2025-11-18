@@ -33,25 +33,19 @@ interface SensorData {
   beatDetected: boolean;
   repCount: number;
   exercise: string;
+  timestamp?: number;
   formScore?: number;
   feedback?: string;
+  meshData?: any;
   stepCount?: number;
   stepDetected?: boolean;
+  stepRate?: number;
   activity?: string;
   activityConfidence?: number;
   runningSpeedKmh?: number;
   caloriesTotal?: number;
   mode?: string;
-  timestamp: number;
-  meshData?: {
-    joints: {
-      [key: string]: {
-        position: { x: number; y: number; z: number };
-        children: string[];
-        name: string;
-      };
-    };
-  };
+  demoMode?: boolean;
 }
 
 const Dashboard = () => {
@@ -610,42 +604,96 @@ const Dashboard = () => {
 
                         <div className="grid grid-cols-3 gap-2">
                           <div>
-                            <Label className="text-xs">Height (cm)</Label>
-                            <Input value={heightCm} onChange={(e) => setHeightCm(e.target.value === '' ? '' : Number(e.target.value))} className="mt-1" />
+                            <Label className="text-xs">Height</Label>
+                            <Input 
+                              value={heightCm} 
+                              onChange={(e) => setHeightCm(e.target.value === '' ? '' : Number(e.target.value))} 
+                              className="mt-1 text-sm" 
+                              placeholder="cm"
+                            />
                           </div>
                           <div>
-                            <Label className="text-xs">Weight (kg)</Label>
-                            <Input value={weightKg} onChange={(e) => setWeightKg(e.target.value === '' ? '' : Number(e.target.value))} className="mt-1" />
+                            <Label className="text-xs">Weight</Label>
+                            <Input 
+                              value={weightKg} 
+                              onChange={(e) => setWeightKg(e.target.value === '' ? '' : Number(e.target.value))} 
+                              className="mt-1 text-sm" 
+                              placeholder="kg"
+                            />
                           </div>
                           <div>
                             <Label className="text-xs">Age</Label>
-                            <Input value={age} onChange={(e) => setAge(e.target.value === '' ? '' : Number(e.target.value))} className="mt-1" />
+                            <Input 
+                              value={age} 
+                              onChange={(e) => setAge(e.target.value === '' ? '' : Number(e.target.value))} 
+                              className="mt-1 text-sm" 
+                              placeholder="years"
+                            />
                           </div>
                         </div>
 
-                        <div className="flex gap-2">
-                          <Button onClick={handleSaveProfile} className="h-10">Save Profile</Button>
-                          <Button onClick={() => handleModeChange(mode === 'normal' ? 'workout' : 'normal')} variant="outline" className="h-10">Toggle Mode</Button>
-                          <Button onClick={handleResetSteps} variant="destructive" className="h-10">Reset Steps</Button>
+                        <div className="flex gap-2 flex-wrap">
+                          <Button onClick={handleSaveProfile} className="h-10 flex-1 min-w-[120px]">Save Profile</Button>
+                          <Button onClick={() => handleModeChange(mode === 'normal' ? 'workout' : 'normal')} 
+                                  variant="outline" className="h-10 flex-1 min-w-[120px]">
+                            {mode === 'normal' ? '💪 Workout' : '📊 Normal'}
+                          </Button>
+                          <Button onClick={handleResetSteps} variant="destructive" className="h-10 flex items-center gap-2">
+                            🔄 Reset Steps
+                          </Button>
                         </div>
 
                         <div className="pt-2 border-t border-border/30">
+                          <div className="grid grid-cols-2 gap-2 mb-3">
+                            <div className={`p-3 rounded-lg transition-all duration-300 ${
+                              sensorData.stepDetected 
+                                ? 'bg-green-100 dark:bg-green-900/30 border-2 border-green-300 dark:border-green-600 scale-105' 
+                                : 'bg-secondary/20'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                <div className="text-xs text-muted-foreground">Steps</div>
+                                {sensorData.stepDetected && (
+                                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                )}
+                              </div>
+                              <div className="text-2xl font-bold flex items-center gap-2">
+                                👟 {sensorData.stepCount ?? 0}
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-1">
+                                {sensorData.stepRate ? `${sensorData.stepRate} steps/min` : 
+                                 sensorData.stepDetected ? 'Step detected!' : 'Monitoring...'}
+                              </div>
+                            </div>
+                            <div className={`p-3 rounded-lg ${sensorData.activity === 'workout' ? 'bg-primary/20 border border-primary/30' : 'bg-secondary/20'}`}>
+                              <div className="text-xs text-muted-foreground">Activity Status</div>
+                              <div className={`text-2xl font-bold ${sensorData.activity === 'workout' ? 'text-primary' : ''}`}>
+                                {sensorData.activity === 'workout' ? '💪 WORKOUT' : 
+                                 sensorData.activity === 'walking' ? '🚶 Walking' :
+                                 sensorData.activity === 'sitting' ? '🪑 Sitting' :
+                                 sensorData.activity === 'standing' ? '🧍 Standing' :
+                                 sensorData.activity ?? 'Unknown'}
+                              </div>
+                              {sensorData.activityConfidence && (
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  Confidence: {(sensorData.activityConfidence * 100).toFixed(0)}%
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Additional metrics in a 2x2 grid */}
                           <div className="grid grid-cols-2 gap-2">
                             <div className="p-3 rounded-lg bg-secondary/20">
-                              <div className="text-xs text-muted-foreground">Steps</div>
-                              <div className="text-2xl font-bold">{sensorData.stepCount ?? 0}</div>
-                            </div>
-                            <div className="p-3 rounded-lg bg-secondary/20">
-                              <div className="text-xs text-muted-foreground">Activity</div>
-                              <div className="text-2xl font-bold">{sensorData.activity ?? 'unknown'}</div>
-                            </div>
-                            <div className="p-3 rounded-lg bg-secondary/20">
-                              <div className="text-xs text-muted-foreground">Speed (km/h)</div>
-                              <div className="text-2xl font-bold">{sensorData.runningSpeedKmh?.toFixed(2) ?? '0.00'}</div>
+                              <div className="text-xs text-muted-foreground">Speed</div>
+                              <div className="text-lg font-bold flex items-center gap-1">
+                                🏃 {sensorData.runningSpeedKmh?.toFixed(1) ?? '0.0'} km/h
+                              </div>
                             </div>
                             <div className="p-3 rounded-lg bg-secondary/20">
                               <div className="text-xs text-muted-foreground">Calories</div>
-                              <div className="text-2xl font-bold">{sensorData.caloriesTotal?.toFixed(2) ?? '0.00'}</div>
+                              <div className="text-lg font-bold flex items-center gap-1">
+                                🔥 {sensorData.caloriesTotal?.toFixed(1) ?? '0.0'} kcal
+                              </div>
                             </div>
                           </div>
                         </div>

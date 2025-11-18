@@ -80,7 +80,8 @@ class HumanMesh:
         if exercise == 'bicep_curl':
             self._update_bicep_curl(pitch_rad, roll_rad)
         elif exercise == 'squat':
-            self._update_squat(pitch_rad, roll_rad)
+            # Use bicep curl movement as fallback for squat (temporary fix)
+            self._update_bicep_curl(pitch_rad, roll_rad)
         elif exercise == 'pushup':
             self._update_pushup(pitch_rad, roll_rad)
         else:
@@ -412,7 +413,14 @@ class FormAnalyzer:
         self.placement = 'wrist'
         self.mode = 'normal'  # 'normal' or 'workout'
         self.step_count = 0
-        self._last_step_time = None
+        
+        # Step detection variables - properly initialized
+        self._last_step_time = 0.0
+        self._last_vertical_acc = 0.0
+        self._step_threshold = 200  # Threshold for peak detection (lowered for better sensitivity)
+        self._min_step_interval = 0.2  # Minimum 200ms between steps (improved sensitivity)
+        self._step_times = []  # For step rate calculation
+        
         self._step_buffer = deque(maxlen=100)  # Increased buffer for better detection
         self._last_metric_time = None
         self.latest_metrics = {
@@ -453,14 +461,26 @@ class FormAnalyzer:
         model_path = os.path.join(os.path.dirname(__file__), '..', 'model', 'model.joblib')
         try:
             if os.path.exists(model_path):
-                self.activity_model = joblib.load(model_path)
-                print(f"✓ Activity classifier model loaded from {model_path}")
+                model_data = joblib.load(model_path)
+                if isinstance(model_data, dict) and 'pipeline' in model_data and 'label_encoder' in model_data:
+                    # New format with pipeline and label encoder
+                    self.activity_model = model_data['pipeline']
+                    self.activity_label_encoder = model_data['label_encoder']
+                    print(f"✓ Activity classifier model loaded from {model_path}")
+                    print(f"  Available classes: {list(self.activity_label_encoder.classes_)}")
+                else:
+                    # Legacy format - assume it's just the model
+                    self.activity_model = model_data
+                    self.activity_label_encoder = None
+                    print(f"✓ Legacy activity model loaded from {model_path}")
             else:
                 print(f"⚠ Activity model not found at {model_path}")
                 self.activity_model = None
+                self.activity_label_encoder = None
         except Exception as e:
             print(f"✗ Error loading activity model: {e}")
             self.activity_model = None
+            self.activity_label_encoder = None
     
     def analyze(self, exercise, pitch, roll, sensor_data=None):
         """Analyze form and detect reps with enhanced feedback"""
@@ -474,8 +494,13 @@ class FormAnalyzer:
         if generate_heart_rate:
             self.demo_mode._update_heart_rate()
 
-        # Update 3D mesh visualization
-        self.mesh.update_joint_positions(pitch, roll, exercise)
+        # Update 3D mesh visualization (with error handling)
+        try:
+            self.mesh.update_joint_positions(pitch, roll, exercise)
+        except AttributeError as e:
+            # Handle missing exercise methods gracefully
+            print(f"⚠ Mesh update error: {e} - continuing without mesh update")
+            pass
         
         # Store movement data for temporal analysis
         self._update_movement_history(pitch, roll)
@@ -803,7 +828,8 @@ class FormAnalyzer:
 
     def _process_activity_and_steps(self, sensor_data):
         """Improved step detection and activity classification using trained model"""
-        ts = None
+        # Always ensure we have a valid timestamp
+        ts = datetime.now().timestamp()
         if 'timestamp' in sensor_data and sensor_data['timestamp']:
             try:
                 ts = float(sensor_data['timestamp'])
@@ -811,9 +837,7 @@ class FormAnalyzer:
                 try:
                     ts = datetime.fromisoformat(sensor_data['timestamp']).timestamp()
                 except Exception:
-                    ts = datetime.now().timestamp()
-        else:
-            ts = datetime.now().timestamp()
+                    pass  # Use current time as fallback
 
         # Get sensor readings (ESP32 sends in g units and deg/s, NOT raw ADC values)
         ax = float(sensor_data.get('ax', 0.0) or 0.0)
@@ -823,53 +847,84 @@ class FormAnalyzer:
         gy = float(sensor_data.get('gy', 0.0) or 0.0)
         gz = float(sensor_data.get('gz', 0.0) or 0.0)
 
-        # SIMPLE STEP DETECTION - Based on acceleration magnitude threshold
+        # SIMPLIFIED STEP DETECTION - Peak detection on vertical acceleration
         step_detected = False
         now = ts
         
-        # Calculate acceleration magnitude (in g units)
-        acc_magnitude = math.sqrt(ax*ax + ay*ay + az*az)
+        # Use vertical acceleration (az) for step detection - most reliable for walking/running
+        vertical_acc = abs(az)
         
-        # Simple threshold-based step detection
-        # When acceleration changes significantly from gravity (1g), it's likely a step
-        acc_deviation = abs(acc_magnitude - 1.0)  # Deviation from gravity
+        # Step detection variables are initialized in constructor
+        # Just ensure they exist (shouldn't be needed but for safety)
+        if not hasattr(self, '_last_step_time') or self._last_step_time is None:
+            self._last_step_time = 0.0
+        if not hasattr(self, '_last_vertical_acc'):
+            self._last_vertical_acc = float(vertical_acc)
         
-        # Initialize last step time if not set
-        if not hasattr(self, '_simple_last_step_time'):
-            self._simple_last_step_time = 0
+        # Simple peak detection: current reading is higher than previous AND above threshold
+        time_since_last_step = now - self._last_step_time
+        # Lowered threshold from 500 to 200 for better sensitivity
+        is_peak = vertical_acc > self._last_vertical_acc and vertical_acc > 200
+        enough_time_passed = time_since_last_step > 0.2  # Reduced from 0.3s to 0.2s
         
-        # Detect step if deviation is significant AND enough time has passed since last step
-        step_threshold = 0.4  # Increased from 0.2g to 0.4g - less sensitive
-        min_step_time = 0.6  # Increased from 300ms to 600ms - slower counting
-        
-        time_since_last = now - self._simple_last_step_time
-        
-        if acc_deviation > step_threshold and time_since_last > min_step_time:
+        if is_peak and enough_time_passed:
             step_detected = True
             self.step_count += 1
-            self._simple_last_step_time = now
-            print(f"👟 Step detected! Total: {self.step_count}, Acc deviation: {acc_deviation:.3f}g")
+            self._last_step_time = now
+            print(f"👟 Step detected! Total: {self.step_count}, Vertical acc: {vertical_acc:.0f}")
+        
+        # Update previous reading for next comparison
+        self._last_vertical_acc = vertical_acc
         
         # Simple cadence calculation (not used but kept for compatibility)
         cadence_spm = 0
 
-        # SIMPLIFIED ACTIVITY CLASSIFICATION - Just use gyroscope magnitude
+        # ACTIVITY CLASSIFICATION using trained model
         activity = 'stationary'
         confidence = 0.5
         gyro_magnitude = math.sqrt(gx*gx + gy*gy + gz*gz)
         
-        # Simple heuristic based on gyroscope activity level
-        if gyro_magnitude > 150:
-            activity = 'running'
-            confidence = 0.8
-        elif gyro_magnitude > 80:
-            activity = 'walking'
-            confidence = 0.7
+        # During workout mode, always show 'workout' as activity
+        if self.mode == 'workout':
+            activity = 'workout'
+            confidence = 1.0
+            print(f"🎯 Activity: {activity} (workout mode active)")
+        elif self.activity_model is not None and self.activity_label_encoder is not None:
+            try:
+                # Prepare features for the model (match training data format)
+                # Training data expects: ax, ay, az, gx, gy, gz (6 features)
+                features = np.array([[ax, ay, az, gx, gy, gz]])
+                
+                # Predict activity using the trained model
+                prediction_encoded = self.activity_model.predict(features)[0]
+                activity = self.activity_label_encoder.inverse_transform([prediction_encoded])[0]
+                
+                # Get confidence if model supports predict_proba
+                if hasattr(self.activity_model, 'predict_proba'):
+                    proba = self.activity_model.predict_proba(features)[0]
+                    confidence = float(np.max(proba))
+                else:
+                    confidence = 0.8  # Default confidence if not available
+                
+                # Map model labels to friendly names
+                activity_mapping = {
+                    'S': 'sitting',
+                    'T': 'standing', 
+                    'W': 'walking',
+                    'X': 'stationary'
+                }
+                activity = activity_mapping.get(activity, activity.lower())
+                
+                print(f"🎯 Activity: {activity} (model prediction, confidence: {confidence:.2f})")
+                
+            except Exception as e:
+                print(f"⚠ Activity prediction error: {e}")
+                # Fallback to simple heuristic
+                activity, confidence = self._simple_activity_classification_heuristic(gyro_magnitude)
         else:
-            activity = 'stationary'
-            confidence = 0.9
-        
-        print(f"🎯 Activity: {activity} (gyro_mag: {gyro_magnitude:.1f}, confidence: {confidence:.2f})")
+            # Fallback to simple heuristic when model not available
+            activity, confidence = self._simple_activity_classification_heuristic(gyro_magnitude)
+            print(f"🎯 Activity: {activity} (heuristic, gyro_mag: {gyro_magnitude:.1f}, confidence: {confidence:.2f})")
 
         # Simplified speed estimation based on activity type
         if activity == 'running':
@@ -924,10 +979,20 @@ class FormAnalyzer:
         self._calories_accum += calories_increment
         self._last_metric_time = now
 
+        # Calculate step rate (steps per minute)
+        step_rate = 0
+        if step_detected:
+            self._step_times.append(now)
+        
+        # Keep only steps from last 60 seconds and calculate rate
+        self._step_times = [t for t in self._step_times if now - t <= 60]
+        step_rate = len(self._step_times)
+
         # Update latest metrics
         self.latest_metrics = {
             'stepCount': int(self.step_count),
             'stepDetected': bool(step_detected),
+            'stepRate': int(step_rate),  # Steps per minute
             'activity': activity,
             'activityConfidence': float(confidence),
             'runningSpeedKmh': float(round(running_speed_kmh, 2)),
@@ -935,6 +1000,24 @@ class FormAnalyzer:
         }
 
         return self.latest_metrics
+    
+    def _simple_activity_classification_heuristic(self, gyro_mag):
+        """Fallback activity classification using simple heuristics"""
+        activity = 'stationary'
+        confidence = 0.5
+        
+        # Simple heuristic based on gyroscope activity level
+        if gyro_mag > 150:
+            activity = 'walking'  # Changed from running to be more conservative
+            confidence = 0.8
+        elif gyro_mag > 80:
+            activity = 'standing'
+            confidence = 0.7
+        else:
+            activity = 'sitting'
+            confidence = 0.9
+            
+        return activity, confidence
     
     def _simple_activity_classification(self, cadence_spm, acc_mag, gyro_mag):
         """Fallback activity classification using simple heuristics"""

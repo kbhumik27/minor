@@ -642,6 +642,68 @@ def set_profile():
     return jsonify({'status': 'profile_set', 'profile': sensor_data['userProfile']})
 
 
+@app.route('/api/test_steps', methods=['POST'])
+def test_steps():
+    """Generate test step data for testing step counter"""
+    global sensor_data
+    
+    data = request.json
+    num_steps = data.get('num_steps', 5)
+    interval = data.get('interval', 0.5)  # seconds between steps
+    
+    import threading
+    import time
+    
+    def generate_test_steps():
+        for i in range(num_steps):
+            # Generate step-like acceleration data
+            # High vertical acceleration (az) simulates foot impact
+            test_data = {
+                'ax': float(100 + i * 50),
+                'ay': float(200 + i * 30), 
+                'az': float(1000 + i * 200),  # High vertical for step detection
+                'gx': float(-100 + i * 20),
+                'gy': float(150 + i * 10),
+                'gz': float(-50 + i * 15),
+                'timestamp': time.time()
+            }
+            
+            # Process through form analyzer
+            try:
+                if form_analyzer.mode == 'normal':
+                    form_analyzer._process_activity_and_steps(test_data)
+                    
+                    # Update sensor_data with results
+                    if hasattr(form_analyzer, 'latest_metrics'):
+                        metrics = form_analyzer.latest_metrics
+                        sensor_data['stepCount'] = metrics.get('stepCount', sensor_data.get('stepCount', 0))
+                        sensor_data['stepDetected'] = metrics.get('stepDetected', False)
+                        sensor_data['stepRate'] = metrics.get('stepRate', 0)
+                        sensor_data['activity'] = metrics.get('activity', sensor_data.get('activity', 'unknown'))
+                        sensor_data['activityConfidence'] = metrics.get('activityConfidence', 0.0)
+                        
+                        # Broadcast to clients
+                        socketio.emit('sensor_data', sensor_data)
+                        
+                        print(f"🧪 Test step {i+1}/{num_steps} - Total steps: {sensor_data.get('stepCount', 0)}")
+                        
+            except Exception as e:
+                print(f"Error in test step {i+1}: {e}")
+            
+            time.sleep(interval)
+    
+    # Start test in background
+    thread = threading.Thread(target=generate_test_steps)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        'status': 'test_started',
+        'num_steps': num_steps,
+        'interval': interval
+    })
+
+
 # SocketIO Events
 
 @socketio.on('connect')
