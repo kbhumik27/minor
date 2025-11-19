@@ -345,42 +345,48 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-hero px-4 py-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-background relative overflow-hidden px-4 py-6">
+      {/* Animated Background Elements */}
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 rounded-full blur-[100px] animate-float" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/10 rounded-full blur-[100px] animate-float delay-500" />
+      </div>
+
+      <div className="max-w-7xl mx-auto relative z-10">
         {/* Header */}
-        <div className="mb-8">
-          <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated">
+        <div className="mb-8 animate-slide-up">
+          <Card className="glass-panel border-white/5">
             <CardContent className="py-6">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="flex items-center gap-4">
-                  <div className="p-3 bg-gradient-to-br from-primary to-accent rounded-xl">
+                  <div className="p-3 bg-gradient-to-br from-primary to-accent rounded-xl shadow-glow animate-pulse-glow">
                     <Activity className="w-8 h-8 text-white" />
                   </div>
                   <div>
-                    <h1 className="text-3xl font-bold mb-1 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                    <h1 className="text-4xl font-bold mb-1 bg-gradient-to-r from-primary via-cyan-400 to-accent bg-clip-text text-transparent tracking-tight">
                       AI Fitness Trainer
                     </h1>
-                    <p className="text-sm text-muted-foreground">Real-time form analysis and rep counting</p>
+                    <p className="text-sm text-muted-foreground font-medium tracking-wide">NEXT-GEN FORM ANALYSIS</p>
                   </div>
                 </div>
                 <div className="flex gap-3 items-center flex-wrap">
                   {isLogging && (
-                    <Badge className="px-4 py-2 text-sm font-medium bg-blue-500/20 text-blue-500 border-blue-500/30 animate-pulse">
+                    <Badge className="px-4 py-2 text-sm font-medium bg-blue-500/20 text-blue-400 border-blue-500/30 animate-pulse shadow-[0_0_15px_rgba(59,130,246,0.5)]">
                       <Save className="w-4 h-4 mr-2" />
                       Recording Data
                     </Badge>
                   )}
                   <Link to="/profile">
-                    <Button variant="outline" className="border-primary/50 hover:bg-primary/10">
+                    <Button variant="outline" className="glass-card border-white/10 hover:bg-white/5">
                       <User className="w-4 h-4 mr-2" />
                       Profile
                     </Button>
                   </Link>
                   <Badge 
-                    className={`px-4 py-2 text-sm font-medium ${
+                    className={`px-4 py-2 text-sm font-medium transition-all duration-500 ${
                       connected 
-                        ? 'bg-green-500/20 text-green-500 border-green-500/30' 
-                        : 'bg-red-500/20 text-red-500 border-red-500/30'
+                        ? 'bg-green-500/20 text-green-400 border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.3)]' 
+                        : 'bg-red-500/20 text-red-400 border-red-500/30'
                     }`}
                   >
                     {connected ? <Wifi className="w-4 h-4 mr-2" /> : <WifiOff className="w-4 h-4 mr-2" />}
@@ -394,7 +400,8 @@ const Dashboard = () => {
 
         {/* Connection Card */}
         {!connected && (
-          <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated mb-8">
+          <div className="animate-tilt-in delay-100">
+            <Card className="glass-panel mb-8">
             <CardHeader className="border-b border-border/50">
               <CardTitle className="flex items-center gap-2">
                 <Wifi className="w-5 h-5 text-primary" />
@@ -431,26 +438,31 @@ const Dashboard = () => {
               </div>
             </CardContent>
           </Card>
+          </div>
         )}
 
         {connected && (
-          <>
+          <div className="animate-fade-in">
             {/* Controls */}
             {mode === 'workout' ? (
-              <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated mb-8">
-                  <CardHeader className="border-b border-border/50">
-                    <CardTitle className="text-lg">Workout Controls</CardTitle>
+              <div className="animate-slide-up delay-200">
+                <Card className="glass-panel mb-8">
+                  <CardHeader className="border-b border-white/5">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                      Workout Controls
+                    </CardTitle>
                     <CardDescription>Configure and control your workout session</CardDescription>
                   </CardHeader>
                   <CardContent className="pt-6">
                     <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                       <div className="lg:col-span-1">
-                        <Label htmlFor="exercise" className="text-sm font-medium">Exercise Type</Label>
+                        <Label htmlFor="exercise" className="text-sm font-medium text-primary/80">Exercise Type</Label>
                         <Select value={selectedExercise} onValueChange={setSelectedExercise}>
-                          <SelectTrigger id="exercise" className="bg-secondary/50 mt-2 h-11">
+                          <SelectTrigger id="exercise" className="bg-black/20 border-white/10 mt-2 h-11 focus:ring-primary/50">
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent>
+                          <SelectContent className="bg-card/95 backdrop-blur-xl border-white/10">
                             <SelectItem value="bicep_curl">💪 Bicep Curls</SelectItem>
                             <SelectItem value="lateral_raise">🦾 Lateral Raises</SelectItem>
                             <SelectItem value="shoulder_press">🏋️ Shoulder Press</SelectItem>
@@ -458,18 +470,18 @@ const Dashboard = () => {
                           </SelectContent>
                         </Select>
                       </div>
-                      <Button onClick={handleStartWorkout} className="bg-gradient-to-r from-green-500 to-emerald-500 hover:shadow-glow hover:shadow-green-500/20 mt-auto h-11">
+                      <Button onClick={handleStartWorkout} className="bg-gradient-to-r from-green-500 to-emerald-600 hover:shadow-glow hover:shadow-green-500/20 mt-auto h-11 transition-all duration-300 hover:scale-[1.02]">
                         <Play className="w-4 h-4 mr-2" />
                         Start Workout
                       </Button>
-                      <Button onClick={handleResetReps} variant="outline" className="border-accent/50 hover:bg-accent/10 mt-auto h-11">
+                      <Button onClick={handleResetReps} variant="outline" className="glass-card border-accent/30 hover:bg-accent/10 mt-auto h-11">
                         <RotateCcw className="w-4 h-4 mr-2" />
                         Reset Reps
                       </Button>
                       <Button 
                         onClick={handleToggleLogging} 
                         variant={isLogging ? "destructive" : "outline"}
-                        className={!isLogging ? "border-primary/50 hover:bg-primary/10" : ""}
+                        className={!isLogging ? "glass-card border-primary/30 hover:bg-primary/10 mt-auto h-11" : "mt-auto h-11 shadow-glow shadow-red-500/20"}
                       >
                         {isLogging ? <Pause className="w-4 h-4 mr-2" /> : <Save className="w-4 h-4 mr-2" />}
                         {isLogging ? "Stop Logging" : "Start Logging"}
@@ -479,7 +491,7 @@ const Dashboard = () => {
                       <Button 
                         onClick={handleViewLogs}
                         variant="outline"
-                        className={`border-blue-500/50 text-blue-500 hover:bg-blue-500/10 ${availableLogs.length > 0 ? 'animate-pulse' : ''}`}
+                        className={`glass-card border-blue-500/30 text-blue-400 hover:bg-blue-500/10 ${availableLogs.length > 0 ? 'animate-pulse' : ''}`}
                       >
                         <Download className="w-4 h-4 mr-2" />
                         {showLogs ? 'Hide' : 'View'} CSV Logs {availableLogs.length > 0 && `(${availableLogs.length})`}
@@ -490,7 +502,7 @@ const Dashboard = () => {
                           handleStopDemo();
                         }} 
                         variant="outline" 
-                        className="border-red-500/50 text-red-500 hover:bg-red-500/10"
+                        className="glass-card border-red-500/30 text-red-400 hover:bg-red-500/10"
                       >
                         <WifiOff className="w-4 h-4 mr-2" />
                         Disconnect
@@ -498,22 +510,28 @@ const Dashboard = () => {
                     </div>
                   </CardContent>
                 </Card>
+              </div>
             ) : (
-              <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated mb-8">
-                <CardHeader className="border-b border-border/50">
-                  <CardTitle className="text-lg">Normal Mode</CardTitle>
-                  <CardDescription>Background monitoring: steps, activity and heart rate</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-col gap-3">
-                    <p className="text-sm text-muted-foreground">In Normal mode the system focuses on continuous monitoring (steps, activity, HR). Switch to Workout to track reps and form for wrist exercises.</p>
-                    <div className="flex gap-2">
-                      <Button onClick={() => handleModeChange('workout')} className="h-10">Switch to Workout</Button>
-                      <Button variant="outline" className="h-10" onClick={() => handleStartDemo('bicep_curl')}>Run Demo (Bicep)</Button>
+              <div className="animate-slide-up delay-200">
+                <Card className="glass-panel mb-8">
+                  <CardHeader className="border-b border-white/5">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                      Normal Mode
+                    </CardTitle>
+                    <CardDescription>Background monitoring: steps, activity and heart rate</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col gap-3">
+                      <p className="text-sm text-muted-foreground">In Normal mode the system focuses on continuous monitoring (steps, activity, HR). Switch to Workout to track reps and form for wrist exercises.</p>
+                      <div className="flex gap-2">
+                        <Button onClick={() => handleModeChange('workout')} className="h-10 bg-gradient-to-r from-primary to-cyan-500 hover:shadow-glow">Switch to Workout</Button>
+                        <Button variant="outline" className="h-10 glass-card" onClick={() => handleStartDemo('bicep_curl')}>Run Demo (Bicep)</Button>
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              </div>
             )}
 
             {/* CSV Logs Viewer */}
@@ -564,146 +582,152 @@ const Dashboard = () => {
             {/* Key Metrics Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                   {mode === 'workout' ? (
-                    <RepCounter 
-                      repCount={sensorData.repCount} 
-                      exercise={selectedExercise}
-                    />
+                    <div className="animate-slide-up delay-300 card-3d">
+                      <RepCounter 
+                        repCount={sensorData.repCount} 
+                        exercise={selectedExercise}
+                      />
+                    </div>
                   ) : (
                     <div />
                   )}
 
                   {/* Form Analysis Card next to Rep Counter */}
                   {mode === 'workout' ? (
-                    <FormFeedback 
-                      formScore={sensorData.formScore || 0}
-                      feedback={sensorData.feedback || "Ready to start"}
-                    />
+                    <div className="animate-slide-up delay-400 card-3d">
+                      <FormFeedback 
+                        formScore={sensorData.formScore || 0}
+                        feedback={sensorData.feedback || "Ready to start"}
+                      />
+                    </div>
                   ) : (
                     <div />
                   )}
 
-                  <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated">
-                    <CardHeader className="border-b border-border/50">
-                      <CardTitle className="text-lg">Mode & Profile</CardTitle>
-                      <CardDescription>Normal vs Workout • User profile for calories/speed</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <div>
-                          <Label className="text-sm">Mode</Label>
-                          <Select value={mode} onValueChange={handleModeChange}>
-                            <SelectTrigger className="mt-2 h-10">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="normal">Normal</SelectItem>
-                              <SelectItem value="workout">Workout</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-2">
+                  <div className="animate-slide-up delay-500 card-3d">
+                    <Card className="glass-panel h-full">
+                      <CardHeader className="border-b border-white/5">
+                        <CardTitle className="text-lg">Mode & Profile</CardTitle>
+                        <CardDescription>Normal vs Workout • User profile for calories/speed</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
                           <div>
-                            <Label className="text-xs">Height</Label>
-                            <Input 
-                              value={heightCm} 
-                              onChange={(e) => setHeightCm(e.target.value === '' ? '' : Number(e.target.value))} 
-                              className="mt-1 text-sm" 
-                              placeholder="cm"
-                            />
+                            <Label className="text-sm">Mode</Label>
+                            <Select value={mode} onValueChange={handleModeChange}>
+                              <SelectTrigger className="mt-2 h-10 bg-black/20 border-white/10">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-card/95 backdrop-blur-xl border-white/10">
+                                <SelectItem value="normal">Normal</SelectItem>
+                                <SelectItem value="workout">Workout</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </div>
-                          <div>
-                            <Label className="text-xs">Weight</Label>
-                            <Input 
-                              value={weightKg} 
-                              onChange={(e) => setWeightKg(e.target.value === '' ? '' : Number(e.target.value))} 
-                              className="mt-1 text-sm" 
-                              placeholder="kg"
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-xs">Age</Label>
-                            <Input 
-                              value={age} 
-                              onChange={(e) => setAge(e.target.value === '' ? '' : Number(e.target.value))} 
-                              className="mt-1 text-sm" 
-                              placeholder="years"
-                            />
-                          </div>
-                        </div>
 
-                        <div className="flex gap-2 flex-wrap">
-                          <Button onClick={handleSaveProfile} className="h-10 flex-1 min-w-[120px]">Save Profile</Button>
-                          <Button onClick={() => handleModeChange(mode === 'normal' ? 'workout' : 'normal')} 
-                                  variant="outline" className="h-10 flex-1 min-w-[120px]">
-                            {mode === 'normal' ? '💪 Workout' : '📊 Normal'}
-                          </Button>
-                          <Button onClick={handleResetSteps} variant="destructive" className="h-10 flex items-center gap-2">
-                            🔄 Reset Steps
-                          </Button>
-                        </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <Label className="text-xs">Height</Label>
+                              <Input 
+                                value={heightCm} 
+                                onChange={(e) => setHeightCm(e.target.value === '' ? '' : Number(e.target.value))} 
+                                className="mt-1 text-sm bg-black/20 border-white/10" 
+                                placeholder="cm"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Weight</Label>
+                              <Input 
+                                value={weightKg} 
+                                onChange={(e) => setWeightKg(e.target.value === '' ? '' : Number(e.target.value))} 
+                                className="mt-1 text-sm bg-black/20 border-white/10" 
+                                placeholder="kg"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Age</Label>
+                              <Input 
+                                value={age} 
+                                onChange={(e) => setAge(e.target.value === '' ? '' : Number(e.target.value))} 
+                                className="mt-1 text-sm bg-black/20 border-white/10" 
+                                placeholder="years"
+                              />
+                            </div>
+                          </div>
 
-                        <div className="pt-2 border-t border-border/30">
-                          <div className="grid grid-cols-2 gap-2 mb-3">
-                            <div className={`p-3 rounded-lg transition-all duration-300 ${
-                              sensorData.stepDetected 
-                                ? 'bg-green-100 dark:bg-green-900/30 border-2 border-green-300 dark:border-green-600 scale-105' 
-                                : 'bg-secondary/20'
-                            }`}>
-                              <div className="flex items-center gap-2">
-                                <div className="text-xs text-muted-foreground">Steps</div>
-                                {sensorData.stepDetected && (
-                                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                          <div className="flex gap-2 flex-wrap">
+                            <Button onClick={handleSaveProfile} className="h-10 flex-1 min-w-[120px] bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30">Save Profile</Button>
+                            <Button onClick={() => handleModeChange(mode === 'normal' ? 'workout' : 'normal')} 
+                                    variant="outline" className="h-10 flex-1 min-w-[120px] glass-card">
+                              {mode === 'normal' ? '💪 Workout' : '📊 Normal'}
+                            </Button>
+                            <Button onClick={handleResetSteps} variant="destructive" className="h-10 flex items-center gap-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30">
+                              🔄 Reset Steps
+                            </Button>
+                          </div>
+
+                          <div className="pt-2 border-t border-white/10">
+                            <div className="grid grid-cols-2 gap-2 mb-3">
+                              <div className={`p-3 rounded-lg transition-all duration-300 ${
+                                sensorData.stepDetected 
+                                  ? 'bg-green-500/20 border-2 border-green-500/50 scale-105 shadow-glow shadow-green-500/20' 
+                                  : 'bg-white/5 border border-white/5'
+                              }`}>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-xs text-muted-foreground">Steps</div>
+                                  {sensorData.stepDetected && (
+                                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                  )}
+                                </div>
+                                <div className="text-2xl font-bold flex items-center gap-2 text-foreground">
+                                  👟 {sensorData.stepCount ?? 0}
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {sensorData.stepRate ? `${sensorData.stepRate} steps/min` : 
+                                   sensorData.stepDetected ? 'Step detected!' : 'Monitoring...'}
+                                </div>
+                              </div>
+                              <div className={`p-3 rounded-lg transition-all duration-300 ${sensorData.activity === 'workout' ? 'bg-primary/20 border border-primary/30 shadow-glow' : 'bg-white/5 border border-white/5'}`}>
+                                <div className="text-xs text-muted-foreground">Activity Status</div>
+                                <div className={`text-2xl font-bold ${sensorData.activity === 'workout' ? 'text-primary' : 'text-foreground'}`}>
+                                  {sensorData.activity === 'workout' ? '💪 WORKOUT' : 
+                                   sensorData.activity === 'walking' ? '🚶 Walking' :
+                                   sensorData.activity === 'sitting' ? '🪑 Sitting' :
+                                   sensorData.activity === 'standing' ? '🧍 Standing' :
+                                   sensorData.activity ?? 'Unknown'}
+                                </div>
+                                {sensorData.activityConfidence && (
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    Confidence: {(sensorData.activityConfidence * 100).toFixed(0)}%
+                                  </div>
                                 )}
                               </div>
-                              <div className="text-2xl font-bold flex items-center gap-2">
-                                👟 {sensorData.stepCount ?? 0}
-                              </div>
-                              <div className="text-xs text-muted-foreground mt-1">
-                                {sensorData.stepRate ? `${sensorData.stepRate} steps/min` : 
-                                 sensorData.stepDetected ? 'Step detected!' : 'Monitoring...'}
-                              </div>
                             </div>
-                            <div className={`p-3 rounded-lg ${sensorData.activity === 'workout' ? 'bg-primary/20 border border-primary/30' : 'bg-secondary/20'}`}>
-                              <div className="text-xs text-muted-foreground">Activity Status</div>
-                              <div className={`text-2xl font-bold ${sensorData.activity === 'workout' ? 'text-primary' : ''}`}>
-                                {sensorData.activity === 'workout' ? '💪 WORKOUT' : 
-                                 sensorData.activity === 'walking' ? '🚶 Walking' :
-                                 sensorData.activity === 'sitting' ? '🪑 Sitting' :
-                                 sensorData.activity === 'standing' ? '🧍 Standing' :
-                                 sensorData.activity ?? 'Unknown'}
-                              </div>
-                              {sensorData.activityConfidence && (
-                                <div className="text-xs text-muted-foreground mt-1">
-                                  Confidence: {(sensorData.activityConfidence * 100).toFixed(0)}%
+                            
+                            {/* Additional metrics in a 2x2 grid */}
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="p-3 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                                <div className="text-xs text-muted-foreground">Speed</div>
+                                <div className="text-lg font-bold flex items-center gap-1 text-foreground">
+                                  🏃 {sensorData.runningSpeedKmh?.toFixed(1) ?? '0.0'} km/h
                                 </div>
-                              )}
-                            </div>
-                          </div>
-                          
-                          {/* Additional metrics in a 2x2 grid */}
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="p-3 rounded-lg bg-secondary/20">
-                              <div className="text-xs text-muted-foreground">Speed</div>
-                              <div className="text-lg font-bold flex items-center gap-1">
-                                🏃 {sensorData.runningSpeedKmh?.toFixed(1) ?? '0.0'} km/h
                               </div>
-                            </div>
-                            <div className="p-3 rounded-lg bg-secondary/20">
-                              <div className="text-xs text-muted-foreground">Calories</div>
-                              <div className="text-lg font-bold flex items-center gap-1">
-                                🔥 {sensorData.caloriesTotal?.toFixed(1) ?? '0.0'} kcal
+                              <div className="p-3 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                                <div className="text-xs text-muted-foreground">Calories</div>
+                                <div className="text-lg font-bold flex items-center gap-1 text-foreground">
+                                  🔥 {sensorData.caloriesTotal?.toFixed(1) ?? '0.0'} kcal
+                                </div>
                               </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
 
             {/* Heart Rate Waveform */}
-            <div className="mb-8">
+            <div className="mb-8 animate-slide-up delay-500">
               <HeartRateWaveform 
                 heartRate={sensorData.pulse}
                 pulse={sensorData.pulse}
@@ -715,9 +739,9 @@ const Dashboard = () => {
             {/* Main Content Grid */}
             <div className="grid lg:grid-cols-3 gap-6 mb-8">
               {/* Sensor Visualization - Takes up 2 columns */}
-              <div className={mode === 'workout' ? "lg:col-span-2" : "lg:col-span-3"}>
-                <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated h-full transition-all duration-300 hover:shadow-xl">
-                  <CardHeader className="border-b border-border/50">
+              <div className={mode === 'workout' ? "lg:col-span-2 animate-slide-up delay-500" : "lg:col-span-3 animate-slide-up delay-500"}>
+                <Card className="glass-panel h-full transition-all duration-500 hover:shadow-glow hover:border-primary/30">
+                  <CardHeader className="border-b border-white/5">
                     <CardTitle className="flex items-center gap-2">
                       <Zap className="w-5 h-5 text-primary animate-pulse" />
                       3D Motion Visualization
@@ -732,51 +756,53 @@ const Dashboard = () => {
             </div>
 
             {/* Orientation Metrics */}
-            <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated mb-8 transition-all duration-300 hover:shadow-lg">
-              <CardHeader className="border-b border-border/50">
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-primary" />
-                  Device Orientation & Motion
-                </CardTitle>
-                <CardDescription>Real-time 3-axis rotation and acceleration data</CardDescription>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  <div className="text-center p-5 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 transition-all duration-500 hover:scale-105 hover:shadow-lg hover:shadow-primary/20">
-                    <div className="text-xs font-semibold text-primary mb-1">PITCH</div>
-                    <div className="text-sm text-muted-foreground mb-3">Forward/Backward Tilt</div>
-                    <div className="text-4xl font-bold text-primary transition-all duration-300">{sensorData.pitch.toFixed(1)}°</div>
+            <div className="animate-slide-up delay-500">
+              <Card className="glass-panel mb-8 transition-all duration-500 hover:shadow-glow hover:border-accent/30">
+                <CardHeader className="border-b border-white/5">
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-primary" />
+                    Device Orientation & Motion
+                  </CardTitle>
+                  <CardDescription>Real-time 3-axis rotation and acceleration data</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                    <div className="text-center p-5 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 transition-all duration-500 hover:scale-105 hover:shadow-lg hover:shadow-primary/20 backdrop-blur-sm">
+                      <div className="text-xs font-semibold text-primary mb-1">PITCH</div>
+                      <div className="text-sm text-muted-foreground mb-3">Forward/Backward Tilt</div>
+                      <div className="text-4xl font-bold text-primary transition-all duration-300">{sensorData.pitch.toFixed(1)}°</div>
+                    </div>
+                    <div className="text-center p-5 rounded-xl bg-gradient-to-br from-accent/10 to-accent/5 border border-accent/20 transition-all duration-500 hover:scale-105 hover:shadow-lg hover:shadow-accent/20 backdrop-blur-sm">
+                      <div className="text-xs font-semibold text-accent mb-1">ROLL</div>
+                      <div className="text-sm text-muted-foreground mb-3">Left/Right Tilt</div>
+                      <div className="text-4xl font-bold text-accent transition-all duration-300">{sensorData.roll.toFixed(1)}°</div>
+                    </div>
+                    <div className="text-center p-5 rounded-xl bg-gradient-to-br from-success/10 to-success/5 border border-success/20 transition-all duration-500 hover:scale-105 hover:shadow-lg hover:shadow-success/20 backdrop-blur-sm">
+                      <div className="text-xs font-semibold text-success mb-1">YAW</div>
+                      <div className="text-sm text-muted-foreground mb-3">Rotation (Compass)</div>
+                      <div className="text-4xl font-bold text-success transition-all duration-300">{sensorData.yaw.toFixed(1)}°</div>
+                    </div>
+                    <div className="text-center p-5 rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20 transition-all duration-500 hover:scale-105 hover:shadow-lg hover:shadow-blue-500/20 backdrop-blur-sm">
+                      <div className="text-xs font-semibold text-blue-500 mb-1">VERTICAL</div>
+                      <div className="text-sm text-muted-foreground mb-3">Z-Axis Acceleration</div>
+                      <div className="text-4xl font-bold text-blue-500 transition-all duration-300">{sensorData.az.toFixed(2)} g</div>
+                    </div>
                   </div>
-                  <div className="text-center p-5 rounded-xl bg-gradient-to-br from-accent/10 to-accent/5 border border-accent/20 transition-all duration-500 hover:scale-105 hover:shadow-lg hover:shadow-accent/20">
-                    <div className="text-xs font-semibold text-accent mb-1">ROLL</div>
-                    <div className="text-sm text-muted-foreground mb-3">Left/Right Tilt</div>
-                    <div className="text-4xl font-bold text-accent transition-all duration-300">{sensorData.roll.toFixed(1)}°</div>
-                  </div>
-                  <div className="text-center p-5 rounded-xl bg-gradient-to-br from-success/10 to-success/5 border border-success/20 transition-all duration-500 hover:scale-105 hover:shadow-lg hover:shadow-success/20">
-                    <div className="text-xs font-semibold text-success mb-1">YAW</div>
-                    <div className="text-sm text-muted-foreground mb-3">Rotation (Compass)</div>
-                    <div className="text-4xl font-bold text-success transition-all duration-300">{sensorData.yaw.toFixed(1)}°</div>
-                  </div>
-                  <div className="text-center p-5 rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20 transition-all duration-500 hover:scale-105 hover:shadow-lg hover:shadow-blue-500/20">
-                    <div className="text-xs font-semibold text-blue-500 mb-1">VERTICAL</div>
-                    <div className="text-sm text-muted-foreground mb-3">Z-Axis Acceleration</div>
-                    <div className="text-4xl font-bold text-blue-500 transition-all duration-300">{sensorData.az.toFixed(2)} g</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
 
             {/* Additional Sensor Details */}
-            <div className="grid md:grid-cols-2 gap-6">
-              <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated transition-all duration-300 hover:shadow-xl hover:scale-[1.02]">
-                <CardHeader>
+            <div className="grid md:grid-cols-2 gap-6 animate-slide-up delay-500">
+              <Card className="glass-panel transition-all duration-500 hover:shadow-xl hover:scale-[1.02] hover:border-primary/30">
+                <CardHeader className="border-b border-white/5">
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Activity className="w-5 h-5 text-primary" />
                     Accelerometer
                   </CardTitle>
                   <CardDescription>Linear acceleration in g-force units</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-6">
                   <div className="space-y-4">
                     <div className="flex justify-between items-center p-3 rounded-lg bg-gradient-to-r from-primary/10 to-transparent border-l-4 border-primary transition-all duration-300 hover:from-primary/20">
                       <span className="text-sm font-medium">X-Axis (Forward/Back)</span>
@@ -794,15 +820,15 @@ const Dashboard = () => {
                 </CardContent>
               </Card>
 
-              <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated transition-all duration-300 hover:shadow-xl hover:scale-[1.02]">
-                <CardHeader>
+              <Card className="glass-panel transition-all duration-500 hover:shadow-xl hover:scale-[1.02] hover:border-accent/30">
+                <CardHeader className="border-b border-white/5">
                   <CardTitle className="text-lg flex items-center gap-2">
                     <TrendingUp className="w-5 h-5 text-accent" />
                     Gyroscope
                   </CardTitle>
                   <CardDescription>Angular velocity in degrees per second</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-6">
                   <div className="space-y-4">
                     <div className="flex justify-between items-center p-3 rounded-lg bg-gradient-to-r from-primary/10 to-transparent border-l-4 border-primary transition-all duration-300 hover:from-primary/20">
                       <span className="text-sm font-medium">X-Axis (Pitch Rate)</span>
@@ -820,7 +846,7 @@ const Dashboard = () => {
                 </CardContent>
               </Card>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>

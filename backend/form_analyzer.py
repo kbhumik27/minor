@@ -417,8 +417,8 @@ class FormAnalyzer:
         # Step detection variables - properly initialized
         self._last_step_time = 0.0
         self._last_vertical_acc = 0.0
-        self._step_threshold = 200  # Threshold for peak detection (lowered for better sensitivity)
-        self._min_step_interval = 0.2  # Minimum 200ms between steps (improved sensitivity)
+        self._step_threshold = 150  # Threshold for peak detection (lowered from 200 for better sensitivity)
+        self._min_step_interval = 0.15  # Minimum 150ms between steps (lowered from 0.2 for improved sensitivity)
         self._step_times = []  # For step rate calculation
         
         self._step_buffer = deque(maxlen=100)  # Increased buffer for better detection
@@ -513,13 +513,16 @@ class FormAnalyzer:
         current_time = datetime.now().timestamp()
         time_since_last_rep = current_time - self.last_rep_time_cooldown
         
-        # Require at least 1 second between reps to prevent double counting
-        cooldown_period = 1.0  # seconds
+        # Require at least 1.5 seconds between reps to prevent double counting (increased from 1.0)
+        cooldown_period = 1.5  # seconds
         
         pitch_change = abs(pitch - self.last_pitch)
         roll_change = abs(roll - self.last_roll)
         
-        if (pitch_change > self.rep_threshold or roll_change > self.rep_threshold) and time_since_last_rep >= cooldown_period:
+        # Increased threshold from 15 to 25 degrees for more deliberate rep detection
+        rep_threshold_adjusted = 25.0
+        
+        if (pitch_change > rep_threshold_adjusted or roll_change > rep_threshold_adjusted) and time_since_last_rep >= cooldown_period:
             rep_detected = True
             self.rep_count += 1
             self.last_rep_time_cooldown = current_time
@@ -863,9 +866,9 @@ class FormAnalyzer:
         
         # Simple peak detection: current reading is higher than previous AND above threshold
         time_since_last_step = now - self._last_step_time
-        # Lowered threshold from 500 to 200 for better sensitivity
-        is_peak = vertical_acc > self._last_vertical_acc and vertical_acc > 200
-        enough_time_passed = time_since_last_step > 0.2  # Reduced from 0.3s to 0.2s
+        # Lowered threshold to 150 for better sensitivity
+        is_peak = vertical_acc > self._last_vertical_acc and vertical_acc > 150
+        enough_time_passed = time_since_last_step > 0.15  # Reduced to 0.15s for better sensitivity
         
         if is_peak and enough_time_passed:
             step_detected = True
@@ -955,8 +958,9 @@ class FormAnalyzer:
             # Ensure non-negative
             if calories_per_min < 0:
                 calories_per_min = 0.0
-                
-            calories_increment = calories_per_min * minutes
+            
+            # Reduce by 50% to prevent unrealistic high values (divide by 2)
+            calories_increment = (calories_per_min * minutes) / 2.0
             
             # Debug log to verify pulse is being used
             if minutes > 0:
@@ -971,7 +975,8 @@ class FormAnalyzer:
                 met = 9.8
             
             # MET formula: Calories = MET × weight(kg) × time(hours)
-            calories_increment = met * self.user_weight_kg * (minutes / 60.0)
+            # Reduced by 50% to prevent unrealistic high values (divide by 2)
+            calories_increment = (met * self.user_weight_kg * (minutes / 60.0)) / 2.0
             
             if minutes > 0:
                 print(f"⚠ Calorie calc using MET fallback (no pulse): activity={activity}, MET={met}")

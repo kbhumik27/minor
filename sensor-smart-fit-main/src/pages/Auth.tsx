@@ -36,7 +36,7 @@ const Auth = () => {
     setTimeout(() => {
       toast({
         title: "Account created!",
-        description: "Welcome to AI Fitness Tracker",
+        description: "Welcome to SmartFit",
       });
       localStorage.setItem("isAuthenticated", "true");
       navigate("/dashboard");
@@ -44,7 +44,7 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 bg-gradient-hero relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center px-4 bg-background relative overflow-hidden">
       {/* Background Effects */}
       <div className="absolute inset-0">
         <div className="absolute top-1/3 left-1/3 w-96 h-96 bg-primary/20 rounded-full blur-3xl animate-pulse-glow"></div>
@@ -55,51 +55,54 @@ const Auth = () => {
         <div className="text-center mb-8">
           <div className="flex flex-col items-center gap-4 mb-4">
             <div className="inline-flex items-center gap-2">
-              <span className="text-2xl font-bold">AI Fitness Tracker</span>
+              <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center shadow-glow">
+                <Activity className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-2xl font-bold text-foreground">SmartFit</span>
             </div>
           </div>
           <p className="text-muted-foreground">Your personal AI gym trainer</p>
         </div>
 
-        <Card className="bg-card/80 backdrop-blur-xl border-border/50 shadow-elevated">
+        <Card className="glass-panel border-white/10">
           <CardHeader>
-            <CardTitle className="text-2xl">Get Started</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-2xl text-foreground">Get Started</CardTitle>
+            <CardDescription className="text-muted-foreground">
               Login or create an account to start training
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="login" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-6">
-                <TabsTrigger value="login">Login</TabsTrigger>
-                <TabsTrigger value="signup">Sign Up</TabsTrigger>
+              <TabsList className="grid w-full grid-cols-2 mb-6 bg-secondary/50">
+                <TabsTrigger value="login" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground text-muted-foreground">Login</TabsTrigger>
+                <TabsTrigger value="signup" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground text-muted-foreground">Sign Up</TabsTrigger>
               </TabsList>
 
               <TabsContent value="login">
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="email" className="text-foreground">Email</Label>
                     <Input
                       id="email"
                       type="email"
                       placeholder="you@example.com"
                       required
-                      className="bg-secondary/50"
+                      className="bg-secondary/50 border-white/10 text-foreground placeholder:text-muted-foreground focus:border-primary"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="password">Password</Label>
+                    <Label htmlFor="password" className="text-foreground">Password</Label>
                     <Input
                       id="password"
                       type="password"
                       placeholder="••••••••"
                       required
-                      className="bg-secondary/50"
+                      className="bg-secondary/50 border-white/10 text-foreground placeholder:text-muted-foreground focus:border-primary"
                     />
                   </div>
                   <Button
                     type="submit"
-                    className="w-full bg-gradient-primary hover:shadow-glow transition-all duration-300"
+                    className="w-full bg-gradient-to-r from-primary to-accent hover:shadow-glow text-white border-0"
                     disabled={isLoading}
                   >
                     {isLoading ? "Logging in..." : "Login"}
@@ -110,38 +113,38 @@ const Auth = () => {
               <TabsContent value="signup">
                 <form onSubmit={handleSignup} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="signup-name">Full Name</Label>
+                    <Label htmlFor="signup-name" className="text-foreground">Full Name</Label>
                     <Input
                       id="signup-name"
                       type="text"
                       placeholder="John Doe"
                       required
-                      className="bg-secondary/50"
+                      className="bg-secondary/50 border-white/10 text-foreground placeholder:text-muted-foreground focus:border-primary"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="signup-email">Email</Label>
+                    <Label htmlFor="signup-email" className="text-foreground">Email</Label>
                     <Input
                       id="signup-email"
                       type="email"
                       placeholder="you@example.com"
                       required
-                      className="bg-secondary/50"
+                      className="bg-secondary/50 border-white/10 text-foreground placeholder:text-muted-foreground focus:border-primary"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="signup-password">Password</Label>
+                    <Label htmlFor="signup-password" className="text-foreground">Password</Label>
                     <Input
                       id="signup-password"
                       type="password"
                       placeholder="••••••••"
                       required
-                      className="bg-secondary/50"
+                      className="bg-secondary/50 border-white/10 text-foreground placeholder:text-muted-foreground focus:border-primary"
                     />
                   </div>
                   <Button
                     type="submit"
-                    className="w-full bg-gradient-accent hover:shadow-accent-glow transition-all duration-300"
+                    className="w-full bg-gradient-to-r from-primary to-accent hover:shadow-glow text-white border-0"
                     disabled={isLoading}
                   >
                     {isLoading ? "Creating account..." : "Create Account"}
