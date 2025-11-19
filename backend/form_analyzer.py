@@ -25,14 +25,14 @@ class MeshJoint:
     name: str
     children: List[str] = None
 
-    def __post_init__(self):
+    def _post_init_(self):
         if self.children is None:
             self.children = []
 
 class HumanMesh:
     """3D human mesh for exercise visualization with enhanced joint tracking"""
     
-    def __init__(self):
+    def _init_(self):
         # Initialize joint hierarchy with more detailed skeleton
         self.joints: Dict[str, MeshJoint] = {
             # Core body
@@ -148,7 +148,7 @@ class HumanMesh:
 class DemoMode:
     """Advanced sensor data simulation for testing"""
     
-    def __init__(self):
+    def _init_(self):
         self.running = False
         self.exercise = 'Ready'
         self.current_angle = 0
@@ -371,7 +371,7 @@ class DemoMode:
 class FormAnalyzer:
     """Real-time form analysis with mesh visualization"""
     
-    def __init__(self):
+    def _init_(self):
         self.mesh = HumanMesh()
         self.demo_mode = DemoMode()
         self.thresholds = {
@@ -585,7 +585,7 @@ class FormAnalyzer:
             
             # Check curl height
             if pitch > thresholds['max_curl']:
-                feedback.append("⚠️ Too much curl - maintain control")
+                feedback.append("⚠ Too much curl - maintain control")
                 score -= 15
             elif pitch >= thresholds['target_curl']:
                 feedback.append("💪 Perfect curl height!")
@@ -664,7 +664,7 @@ class FormAnalyzer:
         if self.rep_state == 'down' and pitch > min_raise:
             self.rep_state = 'up'
             if pitch > max_raise:
-                feedback.append("⚠️ Too high - control the raise")
+                feedback.append("⚠ Too high - control the raise")
                 score -= 10
             else:
                 feedback.append("✓ Good raise")
@@ -695,7 +695,7 @@ class FormAnalyzer:
         if self.rep_state == 'down' and pitch > min_press:
             self.rep_state = 'up'
             if pitch > max_press:
-                feedback.append("⚠️ Overextension")
+                feedback.append("⚠ Overextension")
                 score -= 10
             else:
                 feedback.append("✓ Good press")
@@ -850,36 +850,48 @@ class FormAnalyzer:
         gy = float(sensor_data.get('gy', 0.0) or 0.0)
         gz = float(sensor_data.get('gz', 0.0) or 0.0)
 
-        # SIMPLIFIED STEP DETECTION - Peak detection on vertical acceleration
+        # IMPROVED STEP DETECTION - Adaptive peak detection on acceleration magnitude
         step_detected = False
         now = ts
-        
-        # Use vertical acceleration (az) for step detection - most reliable for walking/running
-        vertical_acc = abs(az)
-        
-        # Step detection variables are initialized in constructor
-        # Just ensure they exist (shouldn't be needed but for safety)
+
+        # Use total acceleration magnitude (ESP32 already provides values in g units)
+        acc_magnitude = math.sqrt(ax*ax + ay*ay + az*az)
+
         if not hasattr(self, '_last_step_time') or self._last_step_time is None:
             self._last_step_time = 0.0
-        if not hasattr(self, '_last_vertical_acc'):
-            self._last_vertical_acc = float(vertical_acc)
-        
-        # Simple peak detection: current reading is higher than previous AND above threshold
-        time_since_last_step = now - self._last_step_time
-        # Lowered threshold to 150 for better sensitivity
-        is_peak = vertical_acc > self._last_vertical_acc and vertical_acc > 150
-        enough_time_passed = time_since_last_step > 0.15  # Reduced to 0.15s for better sensitivity
-        
-        if is_peak and enough_time_passed:
-            step_detected = True
-            self.step_count += 1
-            self._last_step_time = now
-            print(f"👟 Step detected! Total: {self.step_count}, Vertical acc: {vertical_acc:.0f}")
-        
-        # Update previous reading for next comparison
-        self._last_vertical_acc = vertical_acc
-        
-        # Simple cadence calculation (not used but kept for compatibility)
+        if not hasattr(self, '_step_buffer') or self._step_buffer is None:
+            self._step_buffer = deque(maxlen=100)
+
+        # Maintain rolling buffer for adaptive thresholding
+        self._step_buffer.append((now, acc_magnitude))
+
+        if len(self._step_buffer) >= 5:
+            recent_mags = [m for _, m in list(self._step_buffer)[-5:]]
+            window_mags = [m for _, m in self._step_buffer]
+
+            mean_mag = float(np.mean(window_mags))
+            std_mag = float(np.std(window_mags))
+            dynamic_threshold = mean_mag + max(0.15, 1.2 * std_mag)
+
+            mid_idx = 2  # middle of last 5 samples
+            is_peak = (
+                recent_mags[mid_idx] > dynamic_threshold and
+                recent_mags[mid_idx] > recent_mags[mid_idx - 1] and
+                recent_mags[mid_idx] > recent_mags[mid_idx - 2] and
+                recent_mags[mid_idx] > recent_mags[mid_idx + 1] and
+                recent_mags[mid_idx] > recent_mags[mid_idx + 2]
+            )
+
+            time_since_last_step = now - self._last_step_time
+            min_interval = getattr(self, '_min_step_interval', 0.2)
+
+            if is_peak and time_since_last_step >= min_interval:
+                step_detected = True
+                self.step_count += 1
+                self._last_step_time = now
+                print(f"👟 Step detected! Total: {self.step_count}, Acc mag: {acc_magnitude:.2f}g, Threshold: {dynamic_threshold:.2f}g")
+
+        # Simple cadence placeholder (legacy compatibility)
         cadence_spm = 0
 
         # ACTIVITY CLASSIFICATION using trained model
