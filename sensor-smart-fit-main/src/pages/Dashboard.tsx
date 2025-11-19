@@ -17,6 +17,15 @@ import FormFeedback from "@/components/FormFeedback";
 import HeartRateWaveform from "@/components/HeartRateWaveform";
 import io from "socket.io-client";
 
+type MeshData = {
+  vertices?: number[];
+  indices?: number[];
+  normals?: number[];
+  uvs?: number[];
+  colors?: number[];
+  metadata?: Record<string, unknown>;
+};
+
 interface SensorData {
   ax: number;
   ay: number;
@@ -36,7 +45,7 @@ interface SensorData {
   timestamp?: number;
   formScore?: number;
   feedback?: string;
-  meshData?: any;
+  meshData?: MeshData;
   stepCount?: number;
   stepDetected?: boolean;
   stepRate?: number;
@@ -704,19 +713,11 @@ const Dashboard = () => {
                               </div>
                             </div>
                             
-                            {/* Additional metrics in a 2x2 grid */}
-                            <div className="grid grid-cols-2 gap-2">
-                              <div className="p-3 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
-                                <div className="text-xs text-muted-foreground">Speed</div>
-                                <div className="text-lg font-bold flex items-center gap-1 text-foreground">
-                                  🏃 {sensorData.runningSpeedKmh?.toFixed(1) ?? '0.0'} km/h
-                                </div>
-                              </div>
-                              <div className="p-3 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
-                                <div className="text-xs text-muted-foreground">Calories</div>
-                                <div className="text-lg font-bold flex items-center gap-1 text-foreground">
-                                  🔥 {sensorData.caloriesTotal?.toFixed(1) ?? '0.0'} kcal
-                                </div>
+                            {/* Calories card */}
+                            <div className="p-3 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                              <div className="text-xs text-muted-foreground">Calories</div>
+                              <div className="text-lg font-bold flex items-center gap-1 text-foreground">
+                                🔥 {sensorData.caloriesTotal?.toFixed(1) ?? '0.0'} kcal
                               </div>
                             </div>
                           </div>

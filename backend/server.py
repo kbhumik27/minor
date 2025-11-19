@@ -160,6 +160,14 @@ async def connect_to_esp32(esp32_url):
                     
                     # Analyze form only when analyzer is in 'workout' mode and exercise selected
                     analyzer_mode = getattr(form_analyzer, 'mode', 'normal')
+
+                    # In normal mode (or when waiting on exercise selection) we still need step/activity metrics
+                    if analyzer_mode != 'workout' or sensor_data.get('exercise') == 'Ready':
+                        try:
+                            form_analyzer._process_activity_and_steps(sensor_data)
+                        except Exception as e:
+                            print(f"⚠ Activity/steps processing error: {e}")
+
                     if sensor_data.get('exercise') != 'Ready' and analyzer_mode == 'workout':
                         score, feedback, rep_detected = form_analyzer.analyze(
                             sensor_data.get('exercise', 'bicep_curl'),
@@ -749,13 +757,13 @@ def serve_static(path):
         return send_from_directory(str(FRONTEND_BUILD_DIR), 'index.html')
 
 
-if __name__ == '__main__':
+if __name__ == '_main_':
     print("=" * 60)
     print("AI Fitness Tracker - Python Backend Server")
     print("=" * 60)
     
     if DEV_MODE:
-        print("\n⚠️  DEVELOPMENT MODE")
+        print("\n⚠  DEVELOPMENT MODE")
         print("Frontend build not found. To serve the frontend:")
         print("  1. Run: cd frontend/frontend && npm run build")
         print("  2. Or use the Vite dev server: npm run dev")
